@@ -32,6 +32,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "accounts.middleware.AnonymousAccessMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -65,6 +66,11 @@ DATABASES = {
 # Custom user model, defined from the start so it can be extended in T02 without migration problems.
 AUTH_USER_MODEL = "accounts.User"
 
+# Keep the example home page public by default; deployments can require login.
+ALLOW_ANONYMOUS_ACCESS = os.environ.get(
+    "DJANGO_ALLOW_ANONYMOUS_ACCESS", "True"
+).lower() == "true"
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -76,6 +82,7 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Europe/Madrid"
 USE_I18N = True
 USE_TZ = True
+LOCALE_PATHS = [BASE_DIR / "locale"]
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
