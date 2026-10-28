@@ -66,4 +66,42 @@ The Sprint Backlog lives in the organization's GitHub Project (**Team 2 – Spri
 
 ## Getting started
 
-The Django project and the setup instructions are added in task **T01**.
+Requirements: Python 3.12 and Git.
+
+```bash
+git clone https://github.com/upm-agile-team2/upm-entrepreneurship-platform.git
+cd upm-entrepreneurship-platform
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py createsuperuser # optional, for the admin panel at /admin/
+python manage.py runserver
+```
+
+The site runs at http://127.0.0.1:8000/.
+
+Run the tests (GitHub Actions also runs them on every push to `main` and on every pull request):
+
+```bash
+python manage.py test
+```
+
+### Project structure
+
+| Path | Contents |
+|---|---|
+| `config/` | Project settings and root URLs |
+| `accounts/` | Users, sign up, sign in and log out (US013–US015) |
+| `ideas/` | Publishing, editing, browsing and viewing ideas (US001–US004) |
+| `templates/` | Shared templates; `base.html` loads Bootstrap and the navigation bar |
+
+### Environment variables
+
+The defaults work for local development. Deployments must set:
+
+| Variable | Purpose |
+|---|---|
+| `DJANGO_SECRET_KEY` | Secret key |
+| `DJANGO_DEBUG` | `False` in deployment |
+| `DJANGO_ALLOWED_HOSTS` | Comma-separated host names |
