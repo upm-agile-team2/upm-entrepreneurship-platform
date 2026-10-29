@@ -6,4 +6,5 @@ app_name = "ideas"
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path("ideas/new/", views.publish_idea, name="publish"),
 ]
