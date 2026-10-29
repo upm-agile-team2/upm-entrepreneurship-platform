@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% load i18n %}
 
-{% block title %}{% translate "Publish an idea" %} - {% translate "UPM Ideas" %}{% endblock %}
+{% block title %}{{ heading }} - {% translate "UPM Ideas" %}{% endblock %}
 
 {% block content %}
   <div class="row justify-content-center">
     <div class="col-md-8 col-lg-6">
-      <h1 class="h3 mb-3">{% translate "Publish an idea" %}</h1>
+      <h1 class="h3 mb-3">{{ heading }}</h1>
       <form method="post" novalidate>
         {% csrf_token %}
         {% for field in form %}
@@ -18,7 +18,7 @@
             {% endfor %}
           </div>
         {% endfor %}
-        <button type="submit" class="btn btn-primary">{% translate "Publish" %}</button>
+        <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
       </form>
     </div>
   </div>
