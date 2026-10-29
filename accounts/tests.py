@@ -3,6 +3,8 @@ from django.db import IntegrityError
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
+from ideas.models import Idea
+
 
 User = get_user_model()
 
@@ -145,6 +147,106 @@ class AuthenticationFlowTests(TestCase):
             {"username": "student@example.com", "password": self.password},
         )
         self.assertRedirects(response, reverse("ideas:home"))
+
+
+@override_settings(ALLOW_ANONYMOUS_ACCESS=True)
+class AuthenticatedFeatureJourneyTests(TestCase):
+    """US014/US015: exercise the same session across real account and idea routes."""
+
+    password = "Student-access-123!"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.student = User.objects.create_user(
+            email="journey-student@example.com",
+            password=cls.password,
+            name="Journey Student",
+            role=User.Role.STUDENT,
+        )
+
+    def setUp(self):
+        self.publish_url = reverse("ideas:publish")
+        self.login_url = reverse("accounts:login")
+
+    def test_login_prompt_allows_student_to_access_publish_form(self):
+        prompt = self.client.get(self.publish_url)
+        self.assertRedirects(
+            prompt,
+            f"{self.login_url}?next={self.publish_url}",
+            fetch_redirect_response=False,
+        )
+        login_page = self.client.get(prompt.url)
+        self.assertTemplateUsed(login_page, "registration/login.html")
+        self.assertFalse(login_page.wsgi_request.user.is_authenticated)
+
+        response = self.client.post(
+            prompt.url,
+            {"username": self.student.email, "password": self.password},
+            follow=True,
+        )
+
+        self.assertRedirects(response, self.publish_url)
+        self.assertTemplateUsed(response, "ideas/idea_form.html")
+        self.assertTrue(response.wsgi_request.user.is_authenticated)
+        self.assertEqual(response.wsgi_request.user.pk, self.student.pk)
+
+    def test_invalid_credentials_keep_publish_form_restricted(self):
+        prompt = self.client.get(self.publish_url)
+        self.assertRedirects(
+            prompt,
+            f"{self.login_url}?next={self.publish_url}",
+            fetch_redirect_response=False,
+        )
+        self.assertTemplateUsed(self.client.get(prompt.url), "registration/login.html")
+
+        response = self.client.post(
+            prompt.url,
+            {"username": self.student.email, "password": "wrong-password"},
+        )
+
+        self.assertContains(response, "Please enter a correct email address and password.")
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+        self.assertRedirects(self.client.get(self.publish_url), prompt.url)
+        self.assertEqual(Idea.objects.count(), 0)
+
+    def test_logout_blocks_publish_get_and_post(self):
+        login_response = self.client.post(
+            self.login_url,
+            {"username": self.student.email, "password": self.password},
+        )
+        self.assertRedirects(login_response, reverse("ideas:home"))
+        self.assertTrue(login_response.wsgi_request.user.is_authenticated)
+        self.assertTemplateUsed(
+            self.client.get(self.publish_url), "ideas/idea_form.html"
+        )
+
+        publish_response = self.client.post(
+            self.publish_url,
+            {"title": "Campus bikes", "description": "Share bikes between faculties."},
+        )
+        self.assertRedirects(publish_response, reverse("ideas:home"))
+        self.assertEqual(Idea.objects.get().owner, self.student)
+        published_ideas = list(Idea.objects.values())
+
+        logout_response = self.client.post(reverse("accounts:logout"))
+        self.assertRedirects(logout_response, reverse("ideas:home"))
+        self.assertFalse(logout_response.wsgi_request.user.is_authenticated)
+
+        for method in ("GET", "POST"):
+            with self.subTest(method=method):
+                if method == "GET":
+                    response = self.client.get(self.publish_url)
+                else:
+                    response = self.client.post(
+                        self.publish_url,
+                        {"title": "Blocked idea", "description": "Must not be saved."},
+                    )
+
+                self.assertRedirects(
+                    response, f"{self.login_url}?next={self.publish_url}"
+                )
+                self.assertFalse(response.wsgi_request.user.is_authenticated)
+                self.assertEqual(list(Idea.objects.values()), published_ideas)
 
 
 class AnonymousAccessPolicyTests(TestCase):
