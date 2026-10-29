@@ -6,11 +6,26 @@ from django.urls import reverse_lazy
 from django.utils.translation import gettext as _
 
 from .forms import IdeaForm
+from .models import Category, Idea
 
 
 def home(request):
-    # Placeholder start page; it becomes the discovery page in T15 (US003).
-    return render(request, "ideas/home.html")
+    ideas = Idea.objects.select_related("category", "owner")
+    category_id = request.GET.get("category")
+    selected_category = None
+    if category_id:
+        selected_category = Category.objects.filter(pk=category_id).first()
+        ideas = ideas.filter(category=selected_category) if selected_category else ideas.none()
+
+    return render(
+        request,
+        "ideas/home.html",
+        {
+            "ideas": ideas,
+            "categories": Category.objects.all(),
+            "selected_category": selected_category,
+        },
+    )
 
 
 @login_required(login_url=reverse_lazy("accounts:login"))

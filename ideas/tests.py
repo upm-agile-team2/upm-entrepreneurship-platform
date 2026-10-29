@@ -26,6 +26,95 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "base.html")
 
+    def test_home_page_displays_published_ideas(self):
+        idea = Idea.objects.create(
+            title="Campus bike sharing",
+            description="Share bikes between faculties.",
+            owner=create_student(),
+        )
+        response = self.client.get(reverse("ideas:home"))
+        self.assertIn(idea, response.context["ideas"])
+
+    def test_category_filter_shows_only_ideas_in_selected_category(self):
+        technology = Category.objects.create(name="Technology test")
+        health = Category.objects.create(name="Health test")
+        owner = create_student()
+        matching = Idea.objects.create(
+            title="Study planner",
+            description="Plan exams.",
+            owner=owner,
+            category=technology,
+        )
+        Idea.objects.create(
+            title="Clinic booking",
+            description="Book visits.",
+            owner=owner,
+            category=health,
+        )
+
+        response = self.client.get(
+            reverse("ideas:home"), {"category": technology.pk}
+        )
+
+        self.assertEqual(list(response.context["ideas"]), [matching])
+        self.assertEqual(response.context["selected_category"], technology)
+
+    def test_clearing_category_filter_restores_all_ideas(self):
+        technology = Category.objects.create(name="Technology clear test")
+        health = Category.objects.create(name="Health clear test")
+        owner = create_student()
+        ideas = [
+            Idea.objects.create(
+                title="Study planner",
+                description="Plan exams.",
+                owner=owner,
+                category=technology,
+            ),
+            Idea.objects.create(
+                title="Clinic booking",
+                description="Book visits.",
+                owner=owner,
+                category=health,
+            ),
+        ]
+
+        response = self.client.get(reverse("ideas:home"))
+
+        self.assertCountEqual(response.context["ideas"], ideas)
+        self.assertIsNone(response.context["selected_category"])
+
+    def test_empty_category_filter_shows_no_match_message(self):
+        category = Category.objects.create(name="Empty test category")
+
+        response = self.client.get(reverse("ideas:home"), {"category": category.pk})
+
+        self.assertEqual(list(response.context["ideas"]), [])
+        self.assertContains(response, "No ideas were found in this category.")
+
+    def test_discovery_page_renders_idea_and_category_filter_controls(self):
+        category = Category.objects.create(name="Design test category")
+        idea = Idea.objects.create(
+            title="Accessible campus map",
+            description="Map accessible routes.",
+            owner=create_student(),
+            category=category,
+        )
+
+        response = self.client.get(
+            reverse("ideas:home"), {"category": category.pk}
+        )
+
+        self.assertContains(response, idea.title)
+        self.assertContains(response, category.name)
+        self.assertContains(response, 'name="category"')
+        self.assertContains(response, 'value=""')
+        self.assertContains(response, 'href="/"')
+
+    def test_empty_discovery_page_explains_that_no_ideas_are_published(self):
+        response = self.client.get(reverse("ideas:home"))
+
+        self.assertContains(response, "No published ideas yet.")
+
 
 class CategoryModelTests(TestCase):
     def test_initial_categories_are_loaded(self):
