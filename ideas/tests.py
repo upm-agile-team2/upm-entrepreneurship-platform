@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -337,3 +338,64 @@ class IdeaFormPageTests(TestCase):
         self.client.force_login(investor)
         response = self.client.get(reverse("ideas:home"))
         self.assertNotContains(response, reverse("ideas:publish"))
+
+    def test_discovery_controls_and_empty_state_render(self):
+        response = self.client.get(reverse("ideas:home"))
+
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+        self.assertContains(response, 'method="get"')
+        self.assertContains(response, 'name="category"')
+        self.assertContains(response, "Clear filter")
+        self.assertContains(response, 'role="status"')
+        self.assertContains(response, "No ideas are available yet.")
+        self.assertContains(
+            response,
+            '<a href="/" class="btn btn-outline-secondary">Clear filter</a>',
+        )
+
+    def test_empty_collection_shows_the_empty_state(self):
+        html = render_to_string(
+            "ideas/home.html",
+            {"categories": [], "ideas": []},
+        )
+
+        self.assertIn("No ideas are available yet.", html)
+
+    def test_category_query_shows_no_match_empty_state(self):
+        response = self.client.get(reverse("ideas:home"), {"category": "climate"})
+
+        self.assertContains(response, "No ideas match this category.")
+
+    def test_discovery_template_renders_category_options_and_idea_cards(self):
+        # Mock presentation data keeps this test independent of T09's model schema.
+        mock_categories = [("climate", "Climate")]
+        mock_ideas = [
+            {
+                "title": "Mock solar co-op",
+                "description": "Mock data for checking the card layout.",
+                "category": "Climate",
+            }
+        ]
+
+        html = render_to_string(
+            "ideas/home.html",
+            {"categories": mock_categories, "ideas": mock_ideas},
+        )
+
+        self.assertIn('value="climate"', html)
+        self.assertIn('name="category"', html)
+        self.assertIn("Climate", html)
+        self.assertIn("Mock solar co-op", html)
+        self.assertIn("Mock data for checking the card layout.", html)
+
+    def test_discovery_template_preserves_selected_category_context(self):
+        html = render_to_string(
+            "ideas/home.html",
+            {
+                "categories": [("climate", "Climate")],
+                "ideas": [],
+                "selected_category": "climate",
+            },
+        )
+        self.assertIn('<option value="climate" selected>Climate</option>', html)
+        self.assertIn('<option value="climate" selected>Climate</option>', html)
