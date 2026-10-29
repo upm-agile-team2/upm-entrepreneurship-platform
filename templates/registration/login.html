@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Log in" %} | UPM Ideas{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-md-6 col-lg-5">
+      <h1 class="h3 mb-4">{% translate "Log in" %}</h1>
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}
+          <div class="mb-3">
+            {{ field.label_tag }}
+            {{ field }}
+            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary">{% translate "Log in" %}</button>
+      </form>
+      <p class="mt-3">
+        {% translate "Don't have an account?" %}
+        <a href="{% url 'accounts:signup' %}">{% translate "Create an account" %}</a>
+      </p>
+      <a href="{% url 'ideas:home' %}">{% translate "Back to home" %}</a>
+    </div>
+  </div>
+{% endblock %}

@@ -105,3 +105,4 @@ The defaults work for local development. Deployments must set:
 | `DJANGO_SECRET_KEY` | Secret key |
 | `DJANGO_DEBUG` | `False` in deployment |
 | `DJANGO_ALLOWED_HOSTS` | Comma-separated host names |
+| `DJANGO_ALLOW_ANONYMOUS_ACCESS` | `True` by default; set to `False` to require authentication for application pages |
