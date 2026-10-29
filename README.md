@@ -44,6 +44,15 @@ The Sprint Backlog lives in the organization's GitHub Project (**Team 2 – Spri
 3. Open a pull request that includes `Closes #<issue number>` and move the issue to **In Review**.
 4. Another team member reviews and merges the pull request; the issue moves to **Done**.
 
+### Definition of Done
+
+1. All acceptance criteria of the user story are met.
+2. Each acceptance criterion has been tested and all tests pass.
+3. The code is in this repository and has been reviewed by at least one other team member.
+4. The story works in the integrated MVP, not only on a developer's machine.
+5. The screen follows the wireframes agreed in the UX Design Studio.
+6. The story has been demonstrated and accepted by the Product Owner in the Sprint Review.
+
 ## OpenSpec workflow
 
 We use [OpenSpec](https://github.com/Fission-AI/OpenSpec) for spec-driven development with AI assistants. Install it once (requires Node.js):
@@ -63,15 +72,6 @@ Every new change starts with a proposal linked to its issue. From Claude Code:
 3. `/opsx:archive` merges the delta specs into `openspec/specs/` and moves the change to the archive once it is done.
 
 `/opsx:explore`, `/opsx:sync` and `/opsx:update` are also available. GitHub Copilot and Codex get the same workflow from `.github/prompts/` and `.agents/skills/`. Run `openspec validate --all` before opening a pull request.
-
-### Definition of Done
-
-1. All acceptance criteria of the user story are met.
-2. Each acceptance criterion has been tested and all tests pass.
-3. The code is in this repository and has been reviewed by at least one other team member.
-4. The story works in the integrated MVP, not only on a developer's machine.
-5. The screen follows the wireframes agreed in the UX Design Studio.
-6. The story has been demonstrated and accepted by the Product Owner in the Sprint Review.
 
 ## Tech stack
 
