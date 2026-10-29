@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
+from django.contrib.auth.models import AnonymousUser
 from django.template.loader import render_to_string
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -399,3 +400,23 @@ class IdeaFormPageTests(TestCase):
         )
         self.assertIn('<option value="climate" selected>Climate</option>', html)
         self.assertIn('<option value="climate" selected>Climate</option>', html)
+
+    def test_selected_category_context_takes_precedence_over_query_string(self):
+        request = RequestFactory().get("/", {"category": "climate"})
+        request.user = AnonymousUser()
+        html = render_to_string(
+            "ideas/home.html",
+            {
+                "categories": [
+                    ("climate", "Climate"),
+                    ("health", "Health"),
+                ],
+                "ideas": [],
+                "selected_category": "health",
+            },
+            request=request,
+        )
+
+        self.assertIn('<option value="health" selected>Health</option>', html)
+        self.assertNotIn('<option value="climate" selected>Climate</option>', html)
+        self.assertIn("No ideas match this category.", html)

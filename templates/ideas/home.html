@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% load i18n %}
 
-{# Presentation contract: ideas contains title/description/category dictionaries; categories contains (value, label) pairs. #}
 {% block title %}{% translate "Discover ideas" %} | UPM Ideas{% endblock %}
 
 {% block content %}
@@ -15,9 +14,9 @@
         <option value="">{% translate "All categories" %}</option>
         {% for category in categories %}
           {% if category.pk %}
-            <option value="{{ category.pk }}" {% if selected_category == category or request.GET.category == category.pk %}selected{% endif %}>{{ category.name }}</option>
+            <option value="{{ category.pk }}" {% if selected_category == category or not selected_category and request.GET.category == category.pk %}selected{% endif %}>{{ category.name }}</option>
           {% else %}
-            <option value="{{ category.0 }}" {% if selected_category == category.0 or request.GET.category == category.0 %}selected{% endif %}>{{ category.1 }}</option>
+            <option value="{{ category.0 }}" {% if selected_category == category.0 or not selected_category and request.GET.category == category.0 %}selected{% endif %}>{{ category.1 }}</option>
           {% endif %}
         {% endfor %}
       </select>
