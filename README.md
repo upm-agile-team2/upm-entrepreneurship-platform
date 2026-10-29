@@ -44,6 +44,26 @@ The Sprint Backlog lives in the organization's GitHub Project (**Team 2 – Spri
 3. Open a pull request that includes `Closes #<issue number>` and move the issue to **In Review**.
 4. Another team member reviews and merges the pull request; the issue moves to **Done**.
 
+## OpenSpec workflow
+
+We use [OpenSpec](https://github.com/Fission-AI/OpenSpec) for spec-driven development with AI assistants. Install it once (requires Node.js):
+
+```bash
+npm install -g @fission-ai/openspec@latest
+```
+
+- `openspec/specs/` holds the expected behaviour of each capability (`accounts`, `ideas`), taken from the user stories.
+- `openspec/changes/` holds changes in progress; finished changes are moved to `openspec/changes/archive/`.
+- `openspec/config.yaml` gives the assistant the project context and rules.
+
+Every new change starts with a proposal linked to its issue. From Claude Code:
+
+1. `/opsx:propose` creates `openspec/changes/<change>/` with the proposal (which must reference the issue, e.g. `Refs #10` or `US001 (#4)`), delta specs, design and tasks. Review it before writing any code.
+2. `/opsx:apply` implements the change's tasks.
+3. `/opsx:archive` merges the delta specs into `openspec/specs/` and moves the change to the archive once it is done.
+
+`/opsx:explore`, `/opsx:sync` and `/opsx:update` are also available. GitHub Copilot and Codex get the same workflow from `.github/prompts/` and `.agents/skills/`. Run `openspec validate --all` before opening a pull request.
+
 ### Definition of Done
 
 1. All acceptance criteria of the user story are met.
@@ -95,6 +115,7 @@ python manage.py test
 | `accounts/` | Users, sign up, sign in and log out (US013–US015) |
 | `ideas/` | Publishing, editing, browsing and viewing ideas (US001–US004) |
 | `templates/` | Shared templates; `base.html` loads Bootstrap and the navigation bar |
+| `openspec/` | OpenSpec specs, change proposals and configuration (see [OpenSpec workflow](#openspec-workflow)) |
 
 ### Environment variables
 
