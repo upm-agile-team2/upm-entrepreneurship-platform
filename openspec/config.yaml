@@ -1,0 +1,63 @@
+schema: spec-driven
+githubCopilot:
+  cloudAgent: false
+
+# Project context: guides every OpenSpec artifact and workflow.
+context: |
+  Project: UPM Student Entrepreneurship Platform, a web platform for the UPM
+  Innovation Department where students publish entrepreneurial ideas, receive
+  feedback and connect with potential investors. Built by Team 2 for the course
+  Agile Methods for Software Development (UPM, 2026-2027) using Scrum with Lean UX
+  in two-week sprints (week 1 builds the MVP, week 2 validates it with users).
+
+  Language: write every artifact (proposals, specs, designs, tasks) in English.
+
+  Stack:
+  - Python 3.12 and Django 5.2 LTS.
+  - Server-rendered Django templates with Bootstrap 5; `templates/base.html` loads
+    Bootstrap and the navigation bar.
+  - SQLite in development, PostgreSQL in deployment (Render free tier).
+  - Django apps: `accounts` (custom user with a role, Student or Investor; sign up,
+    sign in and log out) and `ideas` (publishing, editing, browsing and viewing ideas).
+  - Settings and root URLs live in `config/`.
+
+  Backlog:
+  - User stories are GitHub issues labelled `user-story` (e.g. "US001 Publish an
+    idea") with acceptance criteria written as Given/When/Then.
+  - Tasks are GitHub issues labelled `task` (e.g. "T10 Implement publishing an idea")
+    that refer to their user story.
+
+  Conventions:
+  - Branch from `main` named after the task, e.g. `T10-publish-idea`.
+  - Pull requests include `Closes #<issue number>` and are reviewed and merged by
+    another team member.
+  - Specs describe behaviour required by the user stories, not only what the code
+    currently does.
+
+  Testing:
+  - Run the tests with `python manage.py test` (Django test framework).
+  - GitHub Actions runs `python manage.py makemigrations --check --dry-run` and
+    `python manage.py test` on every push to `main` and on every pull request.
+
+  Definition of Done:
+  1. All acceptance criteria of the user story are met.
+  2. Each acceptance criterion has been tested and all tests pass.
+  3. The code is in the repository and has been reviewed by at least one other
+     team member.
+  4. The story works in the integrated MVP, not only on a developer's machine.
+  5. The screen follows the wireframes agreed in the UX Design Studio.
+  6. The story has been demonstrated and accepted by the Product Owner in the
+     Sprint Review.
+
+# Per-artifact rules
+rules:
+  proposal:
+    - Link the GitHub issue the change comes from (task and/or user story), e.g. "Refs #31" or "US001 (#4)"
+    - State what is out of scope
+  specs:
+    - Every requirement states its source as "Source: USxxx (#n)"
+    - Derive requirements from user-story acceptance criteria; do not invent requirements that are not in the issues
+    - Write the Given part of a Given/When/Then criterion inside the WHEN bullet
+  tasks:
+    - Include a Django test for each acceptance criterion
+    - End with running `python manage.py test` and checking the Definition of Done
