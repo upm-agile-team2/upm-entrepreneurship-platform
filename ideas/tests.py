@@ -180,6 +180,84 @@ class SubmitIdeaTests(TestCase):
         self.assertEqual(Idea.objects.get().owner, self.student)
 
 
+class EditIdeaTests(TestCase):
+    def setUp(self):
+        self.owner = create_student()
+        self.category = Category.objects.get(name="Technology")
+        self.idea = Idea.objects.create(
+            title="Original title",
+            description="Original description",
+            owner=self.owner,
+        )
+        self.url = reverse("ideas:edit", args=[self.idea.pk])
+        self.client.force_login(self.owner)
+
+    def test_owner_can_update_title_description_and_category(self):
+        response = self.client.post(
+            self.url,
+            {
+                "title": "Updated title",
+                "description": "Updated description",
+                "category": self.category.pk,
+            },
+        )
+        self.assertRedirects(response, reverse("ideas:home"))
+        self.idea.refresh_from_db()
+        self.assertEqual(self.idea.title, "Updated title")
+        self.assertEqual(self.idea.description, "Updated description")
+        self.assertEqual(self.idea.category, self.category)
+
+    def test_owner_sees_edit_form(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Edit idea")
+        self.assertContains(response, "Save changes")
+
+    def test_another_student_gets_403_for_get_and_post(self):
+        other = create_student("other@example.com")
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+        response = self.client.post(
+            self.url, {"title": "Hijacked", "description": "Changed"}
+        )
+        self.assertEqual(response.status_code, 403)
+        self.idea.refresh_from_db()
+        self.assertEqual(self.idea.title, "Original title")
+
+    def test_investor_gets_403(self):
+        investor = User.objects.create_user(
+            email="investor@example.com",
+            password="A-valid-password-123!",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        self.client.force_login(investor)
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                self.url, {"title": "Changed", "description": "Changed"}
+            ).status_code,
+            403,
+        )
+
+    def test_missing_or_whitespace_required_fields_are_not_saved(self):
+        invalid_payloads = [
+            {},
+            {"title": "", "description": "New description"},
+            {"title": "New title", "description": ""},
+            {"title": "   ", "description": "New description"},
+            {"title": "New title", "description": " \n "},
+        ]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                response = self.client.post(self.url, payload)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Please enter a ")
+                self.idea.refresh_from_db()
+                self.assertEqual(self.idea.title, "Original title")
+                self.assertEqual(self.idea.description, "Original description")
+
+
 class RequireEssentialInformationTests(TestCase):
     """Criterion: Require essential information (US001, #4)."""
 
