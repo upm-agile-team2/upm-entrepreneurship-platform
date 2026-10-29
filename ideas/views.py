@@ -14,7 +14,11 @@ def home(request):
     category_id = request.GET.get("category")
     selected_category = None
     if category_id:
-        selected_category = Category.objects.filter(pk=category_id).first()
+        selected_category = (
+            Category.objects.filter(pk=category_id).first()
+            if category_id.isdigit()
+            else None
+        )
         ideas = ideas.filter(category=selected_category) if selected_category else ideas.none()
 
     return render(

@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% load i18n %}
 
+{% block title %}{% translate "Discover ideas" %} | UPM Ideas{% endblock %}
+
 {% block content %}
   <h1 class="h3">{% translate "Discover ideas" %}</h1>
   <p class="text-body-secondary">{% translate "Explore entrepreneurial ideas published by UPM students." %}</p>
@@ -11,15 +13,17 @@
       <select id="category" name="category" class="form-select">
         <option value="">{% translate "All categories" %}</option>
         {% for category in categories %}
-          <option value="{{ category.pk }}" {% if selected_category == category %}selected{% endif %}>{{ category.name }}</option>
+          {% if category.pk %}
+            <option value="{{ category.pk }}" {% if selected_category == category or not selected_category and request.GET.category == category.pk %}selected{% endif %}>{{ category.name }}</option>
+          {% else %}
+            <option value="{{ category.0 }}" {% if selected_category == category.0 or not selected_category and request.GET.category == category.0 %}selected{% endif %}>{{ category.1 }}</option>
+          {% endif %}
         {% endfor %}
       </select>
     </div>
     <div class="col-12">
       <button type="submit" class="btn btn-primary">{% translate "Filter" %}</button>
-      {% if selected_category %}
-        <a class="btn btn-outline-secondary" href="{% url 'ideas:home' %}">{% translate "Clear filter" %}</a>
-      {% endif %}
+      <a href="{% url 'ideas:home' %}" class="btn btn-outline-secondary">{% translate "Clear filter" %}</a>
     </div>
   </form>
 
@@ -32,16 +36,16 @@
               <h2 class="h5 card-title">{{ idea.title }}</h2>
               <p class="card-text">{{ idea.description|linebreaksbr }}</p>
               {% if idea.category %}
-                <span class="badge text-bg-secondary">{{ idea.category.name }}</span>
+                <span class="badge text-bg-secondary">{% if idea.category.name %}{{ idea.category.name }}{% else %}{{ idea.category }}{% endif %}</span>
               {% endif %}
             </div>
           </article>
         </div>
       {% endfor %}
     </div>
-  {% elif selected_category %}
-    <p class="text-body-secondary" role="status">{% translate "No ideas were found in this category." %}</p>
+  {% elif selected_category or request.GET.category %}
+    <p class="text-body-secondary" role="status" data-empty-message="{% translate 'No ideas match this category.' %}">{% translate "No ideas were found in this category." %}</p>
   {% else %}
-    <p class="text-body-secondary" role="status">{% translate "No published ideas yet." %}</p>
+    <p class="text-body-secondary" role="status" data-empty-message="{% translate 'No ideas are available yet.' %}">{% translate "No published ideas yet." %}</p>
   {% endif %}
 {% endblock %}
