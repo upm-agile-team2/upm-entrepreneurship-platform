@@ -2,6 +2,46 @@
 {% load i18n %}
 
 {% block content %}
-  <h1 class="h3">{% translate "UPM Student Entrepreneurship Platform" %}</h1>
-  <p class="text-body-secondary">{% translate "Publish your entrepreneurial ideas and discover new business opportunities." %}</p>
+  <h1 class="h3">{% translate "Discover ideas" %}</h1>
+  <p class="text-body-secondary">{% translate "Explore entrepreneurial ideas published by UPM students." %}</p>
+
+  <form method="get" action="{% url 'ideas:home' %}" class="row row-cols-lg-auto g-2 align-items-end mb-4">
+    <div class="col-12">
+      <label for="category" class="form-label">{% translate "Filter by category" %}</label>
+      <select id="category" name="category" class="form-select">
+        <option value="">{% translate "All categories" %}</option>
+        {% for category in categories %}
+          <option value="{{ category.pk }}" {% if selected_category == category %}selected{% endif %}>{{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12">
+      <button type="submit" class="btn btn-primary">{% translate "Filter" %}</button>
+      {% if selected_category %}
+        <a class="btn btn-outline-secondary" href="{% url 'ideas:home' %}">{% translate "Clear filter" %}</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if ideas %}
+    <div class="row row-cols-1 row-cols-md-2 g-3">
+      {% for idea in ideas %}
+        <div class="col">
+          <article class="card h-100">
+            <div class="card-body">
+              <h2 class="h5 card-title">{{ idea.title }}</h2>
+              <p class="card-text">{{ idea.description|linebreaksbr }}</p>
+              {% if idea.category %}
+                <span class="badge text-bg-secondary">{{ idea.category.name }}</span>
+              {% endif %}
+            </div>
+          </article>
+        </div>
+      {% endfor %}
+    </div>
+  {% elif selected_category %}
+    <p class="text-body-secondary" role="status">{% translate "No ideas were found in this category." %}</p>
+  {% else %}
+    <p class="text-body-secondary" role="status">{% translate "No published ideas yet." %}</p>
+  {% endif %}
 {% endblock %}
