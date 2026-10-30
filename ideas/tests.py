@@ -485,6 +485,8 @@ class IdeaFormPageTests(TestCase):
     def test_form_follows_the_wireframe(self):
         self.client.force_login(create_student())
         html = self.client.get(reverse("ideas:publish")).content.decode()
+        # Check the page's form content independently of document metadata.
+        html = html.split("<main", 1)[1].split("</main>", 1)[0]
         positions = [
             html.index('name="title"'),
             html.index('name="description"'),
