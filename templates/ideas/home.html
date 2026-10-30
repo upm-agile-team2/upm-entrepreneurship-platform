@@ -13,11 +13,7 @@
       <select id="category" name="category" class="form-select">
         <option value="">{% translate "All categories" %}</option>
         {% for category in categories %}
-          {% if category.pk %}
-            <option value="{{ category.pk }}" {% if selected_category == category or not selected_category and request.GET.category == category.pk %}selected{% endif %}>{{ category.name }}</option>
-          {% else %}
-            <option value="{{ category.0 }}" {% if selected_category == category.0 or not selected_category and request.GET.category == category.0 %}selected{% endif %}>{{ category.1 }}</option>
-          {% endif %}
+          <option value="{{ category.pk }}"{% if selected_category == category %} selected{% endif %}>{{ category.name }}</option>
         {% endfor %}
       </select>
     </div>
@@ -34,24 +30,20 @@
           <article class="card h-100">
             <div class="card-body">
               <h2 class="h5 card-title">
-                {% if idea.pk %}
-                  <a href="{% url 'ideas:detail' idea.pk %}">{{ idea.title }}</a>
-                {% else %}
-                  {{ idea.title }}
-                {% endif %}
+                <a href="{% url 'ideas:detail' idea.pk %}">{{ idea.title }}</a>
               </h2>
-              <p class="card-text">{{ idea.description|linebreaksbr }}</p>
+              <p class="card-text">{{ idea.description|truncatewords:30|linebreaksbr }}</p>
               {% if idea.category %}
-                <span class="badge text-bg-secondary">{% if idea.category.name %}{{ idea.category.name }}{% else %}{{ idea.category }}{% endif %}</span>
+                <span class="badge text-bg-secondary">{{ idea.category.name }}</span>
               {% endif %}
             </div>
           </article>
         </div>
       {% endfor %}
     </div>
-  {% elif selected_category or request.GET.category %}
-    <p class="text-body-secondary" role="status" data-empty-message="{% translate 'No ideas match this category.' %}">{% translate "No ideas were found in this category." %}</p>
+  {% elif request.GET.category %}
+    <p class="text-body-secondary" role="status">{% translate "No ideas were found in this category." %}</p>
   {% else %}
-    <p class="text-body-secondary" role="status" data-empty-message="{% translate 'No ideas are available yet.' %}">{% translate "No published ideas yet." %}</p>
+    <p class="text-body-secondary" role="status">{% translate "No published ideas yet." %}</p>
   {% endif %}
 {% endblock %}

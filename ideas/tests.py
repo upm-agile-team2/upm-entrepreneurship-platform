@@ -1,9 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
-from django.contrib.auth.models import AnonymousUser
-from django.template.loader import render_to_string
-from django.test import RequestFactory, TestCase
+from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -516,83 +514,86 @@ class IdeaFormPageTests(TestCase):
         response = self.client.get(reverse("ideas:home"))
         self.assertNotContains(response, reverse("ideas:publish"))
 
+
+class DiscoveryPageTemplateTests(TestCase):
     def test_discovery_controls_and_empty_state_render(self):
         response = self.client.get(reverse("ideas:home"))
 
         self.assertFalse(response.wsgi_request.user.is_authenticated)
         self.assertContains(response, 'method="get"')
         self.assertContains(response, 'name="category"')
-        self.assertContains(response, "Clear filter")
         self.assertContains(response, 'role="status"')
-        self.assertContains(response, "No ideas are available yet.")
+        self.assertContains(response, "No published ideas yet.")
         self.assertContains(
             response,
             '<a href="/" class="btn btn-outline-secondary">Clear filter</a>',
         )
 
-    def test_empty_collection_shows_the_empty_state(self):
-        html = render_to_string(
-            "ideas/home.html",
-            {"categories": [], "ideas": []},
-        )
-
-        self.assertIn("No ideas are available yet.", html)
-
-    def test_category_query_shows_no_match_empty_state(self):
+    def test_invalid_category_shows_no_match_message(self):
         response = self.client.get(reverse("ideas:home"), {"category": "climate"})
 
-        self.assertContains(response, "No ideas match this category.")
+        self.assertContains(response, "No ideas were found in this category.")
 
-    def test_discovery_template_renders_category_options_and_idea_cards(self):
-        # Mock presentation data keeps this test independent of T09's model schema.
-        mock_categories = [("climate", "Climate")]
-        mock_ideas = [
-            {
-                "title": "Mock solar co-op",
-                "description": "Mock data for checking the card layout.",
-                "category": "Climate",
-            }
-        ]
+    def test_unknown_category_id_shows_no_match_message(self):
+        response = self.client.get(reverse("ideas:home"), {"category": "999999"})
 
-        html = render_to_string(
-            "ideas/home.html",
-            {"categories": mock_categories, "ideas": mock_ideas},
+        self.assertEqual(list(response.context["ideas"]), [])
+        self.assertContains(response, "No ideas were found in this category.")
+
+    def test_every_category_is_offered_as_a_filter_option(self):
+        category = Category.objects.create(name="Climate test")
+
+        response = self.client.get(reverse("ideas:home"))
+
+        self.assertContains(
+            response,
+            f'<option value="{category.pk}">{category.name}</option>',
+            html=True,
         )
 
-        self.assertIn('value="climate"', html)
-        self.assertIn('name="category"', html)
-        self.assertIn("Climate", html)
-        self.assertIn("Mock solar co-op", html)
-        self.assertIn("Mock data for checking the card layout.", html)
+    def test_selected_category_is_marked_in_the_filter(self):
+        climate = Category.objects.create(name="Climate test")
+        health = Category.objects.create(name="Health test")
 
-    def test_discovery_template_preserves_selected_category_context(self):
-        html = render_to_string(
-            "ideas/home.html",
-            {
-                "categories": [("climate", "Climate")],
-                "ideas": [],
-                "selected_category": "climate",
-            },
+        response = self.client.get(reverse("ideas:home"), {"category": climate.pk})
+
+        self.assertContains(
+            response,
+            f'<option value="{climate.pk}" selected>{climate.name}</option>',
+            html=True,
         )
-        self.assertIn('<option value="climate" selected>Climate</option>', html)
-        self.assertIn('<option value="climate" selected>Climate</option>', html)
-
-    def test_selected_category_context_takes_precedence_over_query_string(self):
-        request = RequestFactory().get("/", {"category": "climate"})
-        request.user = AnonymousUser()
-        html = render_to_string(
-            "ideas/home.html",
-            {
-                "categories": [
-                    ("climate", "Climate"),
-                    ("health", "Health"),
-                ],
-                "ideas": [],
-                "selected_category": "health",
-            },
-            request=request,
+        self.assertContains(
+            response,
+            f'<option value="{health.pk}">{health.name}</option>',
+            html=True,
         )
 
-        self.assertIn('<option value="health" selected>Health</option>', html)
-        self.assertNotIn('<option value="climate" selected>Climate</option>', html)
-        self.assertIn("No ideas match this category.", html)
+    def test_card_shows_category_badge(self):
+        category = Category.objects.create(name="Climate test")
+        Idea.objects.create(
+            title="Solar co-op",
+            description="Share solar panels.",
+            owner=create_student(),
+            category=category,
+        )
+
+        response = self.client.get(reverse("ideas:home"))
+
+        self.assertContains(
+            response,
+            '<span class="badge text-bg-secondary">Climate test</span>',
+            html=True,
+        )
+
+    def test_card_truncates_long_descriptions(self):
+        description = " ".join(f"word{i}" for i in range(40))
+        Idea.objects.create(
+            title="Long idea",
+            description=description,
+            owner=create_student(),
+        )
+
+        response = self.client.get(reverse("ideas:home"))
+
+        self.assertContains(response, "word29 …")
+        self.assertNotContains(response, "word30")
