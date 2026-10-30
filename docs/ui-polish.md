@@ -1,14 +1,53 @@
-# MVP visual polish
+# UPM ideaHub visual review
 
 Refs #39. Change: `polish-mvp-ui`, based on main `ed85be2`, independently of PR #36.
 
+## UPM ideaHub brand iteration
+
+The user supplied the UPM ideaHub brand kit v1.1, reviewed its local implementation and authorized committing and updating PR #40. The sections below labeled first iteration preserve the earlier visual baseline.
+
+- Exact UPM ideaHub naming in application metadata, page titles, logo alternative text and footer.
+- Original compact SVG on desktop, Ui monogram on mobile, and the kit's SVG/PNG favicon. [Asset provenance and checksums](brand/README.md).
+- Supplied token CSS mapped into the existing theme: blue #0072CE, charcoal, neutral surfaces, restrained 8px controls and 12px cards. The Inter/system font stack is used without downloading fonts.
+- Idea-initial squares, their reserved space, warm accent squares and decorative hero papers removed. Cards prioritize category/title/summary and existing author/date metadata. The reading and form layouts use the same visual system.
+- Existing features only. The kit's optional PWA, reviews, insights, loading workflows and other example screens were not interpreted as feature requests.
+- The wireframe-order test now examines main content, so the document's description metadata cannot be mistaken for the description form field. All order assertions remain in place; 27 discovery/detail/form tests passed.
+
+### Reviewed screenshots
+
+| Desktop | Tablet | Mobile |
+|---|---|---|
+| ![UPM ideaHub discovery on desktop](ui-polish/ideahub-discovery-desktop.png) | ![UPM ideaHub discovery on tablet](ui-polish/ideahub-discovery-tablet.png) | ![UPM ideaHub discovery on mobile](ui-polish/ideahub-discovery-mobile.png) |
+
+| Login | Registration | Publication |
+|---|---|---|
+| ![UPM ideaHub login](ui-polish/ideahub-login.png) | ![UPM ideaHub registration](ui-polish/ideahub-signup.png) | ![UPM ideaHub publication](ui-polish/ideahub-publication.png) |
+
+| Detail | Editing | Mobile validation |
+|---|---|---|
+| ![UPM ideaHub detail](ui-polish/ideahub-detail.png) | ![UPM ideaHub editing](ui-polish/ideahub-edit.png) | ![UPM ideaHub validation](ui-polish/ideahub-errors-mobile.png) |
+
+| Empty category | No publications |
+|---|---|
+| ![UPM ideaHub no matching ideas](ui-polish/ideahub-empty-state.png) | ![UPM ideaHub without publications](ui-polish/ideahub-no-publications.png) |
+
+### Current verification (2026-10-30)
+
+- Full branch suite: **70 tests passed**, system checks clean. Isolated PR #36 compatibility: **78 tests passed**, preserving this branch's scoped wireframe assertion and applying the pending signup fix only in the disposable copy.
+- Browser journey passed at **360/768/1024/1440 CSS px**, including publication, filtering/clearing, detail, editing, logout, investor restrictions, registration/field errors and empty states. No horizontal overflow; very long unbroken titles, descriptions, author names and categories were checked.
+- Compact and mobile SVG variants load at their intended aspect ratios and at least 24px high; exact name checked in titles, application metadata and image alt text. Favicon and styles are local static assets.
+- Keyboard skip link/focus and reduced motion pass. 200% zoom-equivalent reflow was checked at 720 CSS px/device scale 2; this is not a browser-toolbar zoom or complete accessibility audit.
+- Contrast checks: white on brand blue **4.89:1**, brand blue on canvas **4.66:1**, secondary text on canvas **5.60:1**, control borders on white **3.19:1**. Input/secondary-control borders are deliberately stronger than decorative card borders.
+- No migrations needed; strict OpenSpec validation **7 passed, 0 failed**; git diff --check passed. Source assets match the supplied archive byte-for-byte.
+- Local review was completed before the user authorized publication in the existing PR #40. Peer review and merge by another team member remain pending; no deployment is included.
+
 ## Review scope
 
-A shared cobalt/navy/light presentation across discovery, authentication, publication/editing and detail. Existing routes, roles, validation, field order and business requirements remain authoritative. T18 and T19 are separate work.
+A shared blue/charcoal/neutral presentation across discovery, authentication, publication/editing and detail. Existing routes, roles, validation, field order and business requirements remain authoritative. T18 and T19 are separate work.
 
 Browser review uses Microsoft Edge in headless mode, a separate profile and a SQLite database under the ignored `.venv/ui-review/` directory. Review accounts and idea fixtures exist only in that database; the user's development database is not used.
 
-## Baseline
+## First-iteration baseline
 
 Captured on 2026-10-30 at a 1440px viewport, with the existing Bootstrap 5.3.3 stylesheet loaded.
 
@@ -16,7 +55,7 @@ Captured on 2026-10-30 at a 1440px viewport, with the existing Bootstrap 5.3.3 s
 |---|---|
 | ![Discovery before polish](ui-polish/before-discovery.png) | ![Login before polish](ui-polish/before-login.png) |
 
-## Design and verification
+## First-iteration design and verification
 
 - Shared design: system typography, cobalt actions, navy text, a light blue-gray canvas, white surfaces, consistent controls and visible focus. Navigation preserves the existing role-specific actions; a skip link goes directly to main content.
 - Local CSS: Django findstatic resolves `css/app.css`; Edge loads both Bootstrap and the local stylesheet. Anonymous/authenticated navigation checks: 2 tests passed.
@@ -36,7 +75,7 @@ Captured on 2026-10-30 at a 1440px viewport, with the existing Bootstrap 5.3.3 s
 |---|---|
 | ![Detail after polish](ui-polish/after-detail.png) | ![Editing after polish](ui-polish/after-edit.png) |
 
-## Browser integration review
+## First-iteration browser integration review
 
 Edge checks passed on 2026-10-30:
 
@@ -58,11 +97,11 @@ The no-publications state was also captured using the isolated database; its rev
 
 ![No published ideas](ui-polish/after-no-publications.png)
 
-## Independent PR #36 compatibility
+## First-iteration independent PR #36 compatibility
 
 In an isolated copy, the two PR #36 test files and its known one-line empty-signup-POST correction were applied over this layout. All **78 tests passed**. The correction exists only in that disposable compatibility copy: this branch does not change accounts/views.py, T17 documentation, or the T17 OpenSpec change. Its own suite remains the 70 tests integrated in main.
 
-## Project checks
+## First-iteration project checks
 
 | Check | Actual result |
 |---|---|

@@ -1,16 +1,15 @@
 {% extends "base.html" %}
 {% load i18n %}
 
-{% block title %}{% translate "Discover ideas" %} | UPM Ideas{% endblock %}
+{% block title %}{% translate "Discover ideas" %} | UPM ideaHub{% endblock %}
 
 {% block content %}
   <section class="discovery-hero" aria-labelledby="discovery-title">
     <div>
-      <p class="eyebrow">{% translate "The UPM entrepreneurship community" %}</p>
+      <p class="eyebrow">{% translate "Ideas meet opportunity" %}</p>
       <h1 id="discovery-title">{% translate "Discover ideas" %}</h1>
       <p class="page-intro">{% translate "Explore entrepreneurial ideas published by UPM students." %}</p>
     </div>
-    <div class="hero-art" aria-hidden="true"><span class="hero-note"></span><span class="hero-note hero-note-front"></span></div>
   </section>
 
   <form method="get" action="{% url 'ideas:home' %}" class="discovery-filter">
@@ -32,22 +31,25 @@
   {% if ideas %}
     <div class="section-heading">
       <h2>{% translate "Published ideas" %}</h2>
-      <span class="section-caption">{% translate "Student thinking. Shared possibilities." %}</span>
+      <span class="section-caption">{% translate "From the UPM community" %}</span>
     </div>
     <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 idea-grid">
       {% for idea in ideas %}
         <div class="col">
           <article class="card idea-card h-100">
             <div class="card-body">
-              <div class="idea-card-top">
-                <span class="idea-glyph" aria-hidden="true">{{ idea.title|slice:':1'|upper }}</span>
-                {% if idea.category %}<span class="badge text-bg-secondary">{{ idea.category.name }}</span>{% endif %}
-              </div>
+              {% if idea.category %}
+                <div class="idea-card-top"><span class="badge text-bg-secondary">{{ idea.category.name }}</span></div>
+              {% endif %}
               <h3 class="card-title">
                 <a class="stretched-link" href="{% url 'ideas:detail' idea.pk %}">{{ idea.title }}</a>
               </h3>
               <p class="card-text">{{ idea.description|truncatewords:30|linebreaksbr }}</p>
-              <div class="idea-card-footer" aria-hidden="true"><span>{% translate "Explore idea" %}</span><span class="card-arrow">&nearr;</span></div>
+              <div class="idea-meta">
+                {% if idea.owner.name %}<span class="idea-author">{{ idea.owner.name }}</span><span aria-hidden="true">&middot;</span>{% endif %}
+                <time datetime="{{ idea.published_at|date:'c' }}">{{ idea.published_at|date:"M j, Y" }}</time>
+              </div>
+              <div class="idea-card-footer" aria-hidden="true"><span>{% translate "Explore idea" %}</span>{% include "includes/arrow_up_right.html" %}</div>
             </div>
           </article>
         </div>
@@ -55,14 +57,14 @@
     </div>
   {% elif request.GET.category %}
     <div class="empty-state">
-      <span class="empty-symbol" aria-hidden="true">&empty;</span>
-      <h2>{% translate "A little quiet here" %}</h2>
+      <span class="empty-symbol" aria-hidden="true">{% include "includes/empty_ideas_icon.html" %}</span>
+      <h2>{% translate "Explore another category" %}</h2>
       <p role="status">{% translate "No ideas were found in this category." %}</p>
     </div>
   {% else %}
     <div class="empty-state">
-      <span class="empty-symbol" aria-hidden="true">&nearr;</span>
-      <h2>{% translate "Every idea starts somewhere" %}</h2>
+      <span class="empty-symbol" aria-hidden="true">{% include "includes/empty_ideas_icon.html" %}</span>
+      <h2>{% translate "Room for the next idea" %}</h2>
       <p role="status">{% translate "No published ideas yet." %}</p>
     </div>
   {% endif %}
