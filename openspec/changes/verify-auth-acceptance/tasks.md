@@ -1,6 +1,6 @@
 # Tasks
 
-Refs #24 (T17). This first block checks the three criteria of US014 (#2) and the two criteria of US015 (#3) already specified in `openspec/specs/accounts/spec.md`. Other sprint stories remain in the wider T17 backlog.
+Refs #24 (T17). Tasks 1-3 preserve the completed authentication block. On 2026-10-30 the task owner requested full T17 completion; section 4 extends verification to all 21 criteria of US013-US015 (#1-#3) and US001-US004 (#4-#7).
 
 Commands below assume the project virtual environment is active. On Windows, use `.\.venv\Scripts\python.exe` in place of `python` when needed.
 
@@ -21,9 +21,16 @@ Commands below assume the project virtual environment is active. On Windows, use
 - [x] 3.2 Run `openspec validate --all --strict` and `git diff --check`; verify this change validates with its deliberate `skip_specs: true`, record any pre-existing configuration warning without hiding it, and confirm the diff contains only this change's planning files, the planned tests, and the coverage document.
 - [x] 3.3 Run `python manage.py test` for the complete project and record the actual result. Check the Definition of Done in the README against this first block, document reviewer/demo/Product Owner items that remain pending, and verify the completion note keeps T17 open for its remaining stories rather than claiming the whole sprint is tested.
 
+## 4. Complete Sprint 1 acceptance coverage
+
+- [x] 4.1 Add request-level registration acceptance tests for omitted required fields, invalid values, and an empty POST. Reproduce and minimally correct any demonstrated POST-binding regression required by US013's existing validation criterion; verify with `python manage.py test accounts.tests.RegistrationAcceptanceTests` and retain the existing success/duplicate tests.
+- [x] 4.2 Extend the same-session logout journey to reject both GET and POST on publication and editing, preserving stored ideas and prompting for login. Verify with `python manage.py test accounts.tests.AuthenticatedFeatureJourneyTests`.
+- [x] 4.3 Add student/investor journeys that verify a real publication appears in browsing/filtering/detail and that an owner's saved edits become visible to the investor. Verify named links, persisted fields, and displayed content with `python manage.py test ideas.tests.IdeaAcceptanceJourneyTests`. Strengthen field-specific edit validation evidence and verify `ideas.tests.EditIdeaTests.test_missing_or_whitespace_required_fields_are_not_saved`.
+- [x] 4.4 Complete `docs/acceptance-coverage.md` with all 21 criteria and exact test references. Verify every reference exists, every requirement from the two main specifications appears exactly once, and the document clearly separates automated coverage from peer review, deployment, UX, and Product Owner acceptance.
+- [x] 4.5 Run `python manage.py test`, `python manage.py makemigrations --check --dry-run`, `openspec validate --all --strict`, and `git diff --check`. Record actual results, review the complete diff and Definition of Done, and confirm only T17 is proposed for completion after peer review and merge.
+
 ## Workflow follow-up
 
-- Open a pull request from `T17-auth-acceptance-tests` with `Refs #24`, and ask another team member to review it. Do not use `Closes #24` for this partial block.
-- Use the resulting evidence to coordinate the review of T07 (#14), US014 (#2), and US015 (#3); issue state changes require their own completion review.
-- Archive `verify-auth-acceptance` after implementation, verification, review, and merge, following the team's OpenSpec workflow.
-- Extend T17 coverage as the editing, browsing, filtering, and detail features are integrated.
+- Update PR #36 from `T17-auth-acceptance-tests` with the complete T17 scope and a resolving reference for #24 only. Make it ready for another team member's review after verification.
+- Do not resolve or change story issues #1-#7; their deployment, UX, and Product Owner acceptance remain separately tracked.
+- Archive `verify-auth-acceptance` after implementation, verification, peer review, and merge, following the team's OpenSpec workflow.

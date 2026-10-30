@@ -1,7 +1,9 @@
+import re
+
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
-from django.test import TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -429,17 +431,19 @@ class EditIdeaTests(TestCase):
 
     def test_missing_or_whitespace_required_fields_are_not_saved(self):
         invalid_payloads = [
-            {},
-            {"title": "", "description": "New description"},
-            {"title": "New title", "description": ""},
-            {"title": "   ", "description": "New description"},
-            {"title": "New title", "description": " \n "},
+            ({}, ("title", "description")),
+            ({"title": "", "description": "New description"}, ("title",)),
+            ({"title": "New title", "description": ""}, ("description",)),
+            ({"title": "   ", "description": "New description"}, ("title",)),
+            ({"title": "New title", "description": " \n "}, ("description",)),
         ]
-        for payload in invalid_payloads:
+        for payload, missing_fields in invalid_payloads:
             with self.subTest(payload=payload):
                 response = self.client.post(self.url, payload)
                 self.assertEqual(response.status_code, 200)
-                self.assertContains(response, "Please enter a ")
+                self.assertEqual(set(response.context["form"].errors), set(missing_fields))
+                for field in missing_fields:
+                    self.assertContains(response, f"Please enter a {field} for your idea.")
                 self.idea.refresh_from_db()
                 self.assertEqual(self.idea.title, "Original title")
                 self.assertEqual(self.idea.description, "Original description")
@@ -597,3 +601,131 @@ class DiscoveryPageTemplateTests(TestCase):
 
         self.assertContains(response, "word29 …")
         self.assertNotContains(response, "word30")
+
+
+@override_settings(ALLOW_ANONYMOUS_ACCESS=True)
+class IdeaAcceptanceJourneyTests(TestCase):
+    """US001-US004: stored publications and edits are visible to another account."""
+
+    password = "Idea-acceptance-123!"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.student = User.objects.create_user(
+            email="idea-owner@example.com",
+            password=cls.password,
+            name="Idea Owner",
+            role=User.Role.STUDENT,
+        )
+        cls.investor = User.objects.create_user(
+            email="idea-reader@example.com",
+            password=cls.password,
+            name="Idea Reader",
+            role=User.Role.INVESTOR,
+        )
+        cls.technology = Category.objects.create(name="Acceptance technology")
+        cls.health = Category.objects.create(name="Acceptance health")
+        cls.empty_category = Category.objects.create(name="Acceptance empty")
+
+    def setUp(self):
+        self.home_url = reverse("ideas:home")
+        self.investor_client = Client()
+        for client, user in ((self.client, self.student), (self.investor_client, self.investor)):
+            response = client.post(
+                reverse("accounts:login"),
+                {"username": user.email, "password": self.password},
+            )
+            self.assertRedirects(response, self.home_url)
+            self.assertEqual(response.wsgi_request.user.pk, user.pk)
+
+    def publish_idea(self, title, description, category):
+        response = self.client.post(
+            reverse("ideas:publish"),
+            {"title": title, "description": description, "category": category.pk},
+        )
+        self.assertRedirects(response, self.home_url)
+        idea = Idea.objects.get(title=title)
+        self.assertEqual(idea.owner, self.student)
+        return idea
+
+    def test_investor_can_discover_filter_and_open_published_ideas(self):
+        description = (
+            "Students share solar panels and exchange practical advice about clean energy. "
+            "Each faculty can contribute spare equipment and organise activities with local partners. "
+            "The detail page explains the full proposal, including maintenance and fair access."
+        )
+        idea = self.publish_idea("Campus energy network", description, self.technology)
+        other = self.publish_idea("Shared clinic booking", "Book student health visits.", self.health)
+
+        discovery = self.investor_client.get(self.home_url)
+        self.assertContains(discovery, idea.title)
+        self.assertContains(discovery, other.title)
+
+        filtered = self.investor_client.get(self.home_url, {"category": self.technology.pk})
+        self.assertContains(filtered, idea.title)
+        self.assertNotContains(filtered, other.title)
+
+        empty = self.investor_client.get(self.home_url, {"category": self.empty_category.pk})
+        self.assertContains(empty, "No ideas were found in this category.")
+        self.assertNotContains(empty, idea.title)
+        self.assertNotContains(empty, other.title)
+        self.assertRegex(
+            empty.content.decode(),
+            rf'<a\b[^>]*href="{re.escape(self.home_url)}"[^>]*>\s*Clear filter\s*</a>',
+        )
+
+        cleared = self.investor_client.get(self.home_url)
+        self.assertContains(cleared, idea.title)
+        self.assertContains(cleared, other.title)
+        detail_url = reverse("ideas:detail", args=[idea.pk])
+        self.assertContains(cleared, f'href="{detail_url}"')
+
+        detail = self.investor_client.get(detail_url)
+        self.assertContains(detail, idea.title)
+        self.assertContains(detail, description)
+        self.assertContains(detail, self.technology.name)
+        self.assertRegex(
+            detail.content.decode(),
+            rf'<a\b[^>]*href="{re.escape(self.home_url)}"[^>]*>\s*Back to ideas\s*</a>',
+        )
+        returned = self.investor_client.get(self.home_url)
+        self.assertContains(returned, idea.title)
+        self.assertContains(returned, other.title)
+
+    def test_owner_edits_are_visible_to_another_user(self):
+        idea = self.publish_idea(
+            "Solar sharing club", "Students share solar panels.", self.technology
+        )
+        detail_url = reverse("ideas:detail", args=[idea.pk])
+        edit_url = reverse("ideas:edit", args=[idea.pk])
+        owner_detail = self.client.get(detail_url)
+        self.assertContains(owner_detail, f'href="{edit_url}"')
+        self.assertContains(owner_detail, "Edit idea")
+
+        edit_form = self.client.get(edit_url)
+        self.assertTemplateUsed(edit_form, "ideas/idea_form.html")
+        self.assertContains(edit_form, idea.title)
+        self.assertContains(edit_form, idea.description)
+
+        edited_data = {
+            "title": "Shared campus energy",
+            "description": "Organise shared batteries between faculties.",
+            "category": self.health.pk,
+        }
+        response = self.client.post(edit_url, edited_data)
+        self.assertRedirects(response, self.home_url)
+        idea.refresh_from_db()
+        self.assertEqual(idea.title, edited_data["title"])
+        self.assertEqual(idea.description, edited_data["description"])
+        self.assertEqual(idea.category, self.health)
+        self.assertEqual(idea.owner, self.student)
+
+        discovery = self.investor_client.get(self.home_url)
+        self.assertContains(discovery, edited_data["title"])
+        self.assertContains(discovery, edited_data["description"])
+        self.assertNotContains(discovery, "Solar sharing club")
+        detail = self.investor_client.get(detail_url)
+        self.assertContains(detail, edited_data["title"])
+        self.assertContains(detail, edited_data["description"])
+        self.assertContains(detail, self.health.name)
+        self.assertNotContains(detail, self.technology.name)

@@ -2,7 +2,7 @@
 
 ## Context
 
-See `proposal.md` for motivation and scope. This first block of T17 (#24) checks the existing US014 (#2) and US015 (#3) requirements in `openspec/specs/accounts/spec.md` against the integrated application at main commit `b1bee12`.
+See `proposal.md` for motivation and scope. The initial block below checked US014 (#2) and US015 (#3) against main commit `b1bee12`. On 2026-10-30 the task owner requested full T17 completion; the new section below extends verification to all 21 criteria using integrated main at `ed85be2` and preserves the initial evidence as history.
 
 Observed implementation:
 
@@ -28,14 +28,14 @@ The existing suite passed 42 tests during the preceding local integration check.
 
 **Goals:**
 
-- Produce repeatable, cross-app request/session evidence for all five criteria above.
+- Produce repeatable, cross-app request/session evidence for all 21 criteria across the seven Sprint 1 stories.
 - Make the evidence traceable by criterion, story issue, and concrete test method.
-- Preserve the distinction between completing this block and completing T17 for the whole sprint.
+- Preserve the distinction between completing T17's test deliverable and the separate UX, deployment, and Product Owner work.
 
 **Non-Goals:**
 
 - Browser automation, accessibility assessment, visual wireframe approval, load testing, or a new authentication design.
-- Testing an edit, discovery, filtering, or detail route before that route is integrated.
+- New product features, changed business requirements, or testing routes that have not been integrated.
 - Claiming Product Owner acceptance, automatically changing story status, or creating substitute business requirements to accommodate the current implementation.
 
 ## Decisions
@@ -44,7 +44,7 @@ The existing suite passed 42 tests during the preceding local integration check.
 
 Add an `AuthenticatedFeatureJourneyTests` class in `accounts/tests.py`, using `TestCase` and its HTTP client. Create a student account through `User.objects.create_user` in setup, but establish and end the session through `accounts:login` and `accounts:logout` HTTP requests. Do not use `force_login`, `client.login`, or mocks for the actions under test.
 
-Keeping the journey in the existing accounts suite avoids new dependencies and leaves `ideas/tests.py` to the feature work already covered there. A separate browser framework was considered and rejected because the identified gap is session continuity across existing Django endpoints, not browser rendering.
+Keeping the authentication journeys in the existing accounts suite avoids new dependencies. The expanded publication/edit/discovery journeys belong in `ideas/tests.py` alongside the existing feature tests. A separate browser framework was considered and rejected because the identified gaps concern requests and session continuity across existing Django endpoints.
 
 ### Prove per-route authentication with anonymous browsing enabled
 
@@ -62,17 +62,26 @@ These journeys exercise the stated criteria. Repeating existing standalone form,
 
 ### Keep requirements stable and record evidence separately
 
-The current `accounts` requirements already express the expected behavior. Declare `skip_specs: true` and add no delta specs. During implementation, create `docs/acceptance-coverage.md` with the five-criterion matrix, exact existing/new test references, commands used for verification, and an explicit statement that the other sprint stories remain outside this block.
+The current `accounts` and `ideas` requirements already express the expected behavior. Keep `skip_specs: true` and add no delta specs. Complete `docs/acceptance-coverage.md` with all 21 criteria, exact existing/new test references, actual verification results, and an explicit separation of testing from the remaining deployment, UX, peer review, and Product Owner work.
 
-A future PR references #24 using `Refs #24`; it does not close the whole task or T07. This deliberately adapts the normal closing-keyword convention to a partial deliverable.
+Once full verification passes, update PR #36 to the complete T17 scope and target #24 only for completion after peer review and merge. Story references remain informational. Do not merge the PR ourselves or change story states.
+
+### Complete coverage after the remaining features are integrated
+
+- Registration: add request-level regressions for each missing required field, invalid email/name/password values, and an empty POST. `signup` currently binds `request.POST or None`, which may render an unbound form without validation messages for an empty POST. Reproduce this before applying any minimal method-based binding correction, as already used by publishing and editing.
+- Logout: extend the same authenticated client journey to denied GET/POST requests on both publication and editing, checking the login prompt and an unchanged snapshot of stored ideas.
+- Publication/discovery/detail: use distinct student and investor clients, authenticated through the actual login endpoint. Publish two categories through HTTP, verify another user can see the results, filter and observe an empty category, clear the filter, open full details, and return to discovery.
+- Editing: follow the owner's Edit link, verify the populated form, save changed title/description/category, and verify those persisted changes are displayed to the investor. Strengthen the existing missing-field test to check the exact erroneous fields and their visible messages while preserving stored data; retain the non-owner rejection tests.
+- Coverage matrix: map all 21 main-spec requirements exactly once to actual test methods. Use named URLs and semantic link labels/targets; direct ORM reads may verify persistence but cannot substitute for another account's ability to see the result.
+- These additions remain Django request/session tests, without new browser automation dependencies. Minimal fixes of reproduced acceptance failures restore existing requirements rather than changing their contract.
 
 ## Risks / Trade-offs
 
 - A Django client test is not a browser or usability test -> state that limit in the evidence document and retain the team's separate UX and demo checks.
-- New work may add or alter restricted routes -> keep this first block scoped to the integrated publication route and extend the coverage matrix as later features arrive.
-- A discovered application defect could require production changes -> report the failing criterion and agree on a follow-up implementation scope rather than weakening assertions or editing runtime behavior in this test-only change.
+- New work may add or alter restricted routes -> verify both currently integrated write routes and keep the coverage matrix tied to the version under review.
+- A discovered application defect may violate an existing criterion -> reproduce it with a regression and keep the correction minimal and directly tied to that requirement; do not weaken assertions or introduce new product behavior.
 - Existing OpenSpec configuration emits a warning because `rules.specs[0]` is parsed as a YAML mapping -> record the warning separately; correcting shared tooling configuration is outside this block. This change has no spec deltas and still follows the existing source requirements.
 
 ## Migration Plan
 
-No application migration or deployment step is needed. Review and merge the future test/documentation PR through the normal workflow, keeping T17 open for its remaining stories. Archive `verify-auth-acceptance` after that block is implemented, verified, reviewed, and merged.
+No dependency or database migration is expected. Incorporate main into the T17 branch with a merge, finish all acceptance coverage and verification, and update PR #36 for peer review. T17 remains open until that reviewed PR is merged. Archive this change afterward, independently of the other authors' changes.

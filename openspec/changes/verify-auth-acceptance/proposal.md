@@ -2,9 +2,11 @@
 
 ## Why
 
-The merged authentication and idea-publishing features now provide a real account-required route, but their tests mostly exercise login, publication, and logout separately. T17 needs evidence that US014 and US015 also hold across the complete session lifecycle, especially when a logged-out user revisits or submits a restricted form.
+T17 (#24) requires tests for the acceptance criteria of all seven Sprint 1 stories. The initial authentication block is implemented; publication, editing, discovery, and detail are now integrated in main, so the remaining coverage can be verified without waiting for other feature branches.
 
-Refs #24 (T17). Acceptance sources: US014 (#2) and US015 (#3). The results can inform the review of T07 (#14).
+On 2026-10-30 the task owner requested completion of the whole T17 scope. The historical change name is retained while coverage expands from five authentication criteria to all 21 Sprint 1 criteria.
+
+Refs #24 (T17). Sources: US013-US015 (#1-#3) and US001-US004 (#4-#7).
 
 ## What Changes
 
@@ -12,9 +14,12 @@ Refs #24 (T17). Acceptance sources: US014 (#2) and US015 (#3). The results can i
 - Verify successful login after an anonymous visitor is prompted to sign in, and verify that incorrect credentials keep the protected feature inaccessible.
 - Exercise login, a successful publication, logout, and subsequent protected GET and POST requests using the same client; rejected requests must not create another idea.
 - Run these checks with anonymous browsing enabled so they verify the publication route's own authentication requirement rather than the optional global login policy.
-- Add a concise acceptance-coverage document linking all five criteria of US014 and US015 to existing and new tests, while recording the remaining scope of T17.
+- Extend the logout checks to the integrated edit route as well as publication.
+- Add registration regressions for omitted fields, invalid values, and an empty POST; minimally correct a demonstrated failure of the existing validation requirement if necessary.
+- Add real student/investor journeys proving publication visibility, filtering/clearing/detail navigation, and visibility of an owner's saved edits.
+- Complete the acceptance-coverage document with all 21 criteria, reusing existing tests and recording actual execution results.
 
-Out of scope: implementing or changing registration, login, logout, access policy, publication, editing, discovery, filtering, or detail-page behavior; changing wireframes; deploying the application; archiving `publish-idea`; and automatically closing T17, T07, or the user stories. Later functionality remains the responsibility of its current task owners.
+Out of scope: new features or changed requirements, redesigning screens or authentication, deployment (T19), usability prototypes/experiments (T18), shared OpenSpec configuration changes, archiving other authors' changes, merging our own PR without peer review, or automatically completing user stories. Minimal corrections of demonstrated existing acceptance failures are within the requested completion scope.
 
 ## Capabilities
 
@@ -24,12 +29,12 @@ None. This change verifies existing behavior.
 
 ### Modified Capabilities
 
-None. `accounts` already defines the five acceptance requirements being checked, and `ideas` already supplies the publication behavior used by the tests. No requirement or acceptance criterion is added or weakened. This test/documentation-only change explicitly declares `skip_specs: true` in `.openspec.yaml`, so no delta specs are required.
+None. `accounts` and `ideas` already define all 21 requirements. No requirement is added or weakened; any minimal regression correction restores the existing contract. This change declares `skip_specs: true` because no spec-level behavior changes and no delta specs are required.
 
 ## Impact
 
-- Planned implementation files: `accounts/tests.py` and a new `docs/acceptance-coverage.md`.
-- Existing routes exercised: `accounts:login`, `accounts:logout`, and `ideas:publish`.
-- Existing tests in `accounts/tests.py` and `ideas/tests.py` remain in place; new tests fill session-lifecycle gaps instead of duplicating their assertions as standalone cases.
-- No runtime dependencies, database migrations, API changes, or production configuration changes.
-- A future pull request should use `Refs #24`, not `Closes #24`: this is the first block of T17, not complete acceptance coverage of all seven sprint stories.
+- Implementation files: `accounts/tests.py`, `ideas/tests.py`, and `docs/acceptance-coverage.md`; runtime code only for a demonstrated existing acceptance failure.
+- Existing routes exercised: signup, login, logout, publication, editing, discovery, and detail.
+- Existing tests in `accounts/tests.py` and `ideas/tests.py` remain in place; new tests fill validation and cross-feature session gaps, and existing assertions are strengthened where criterion evidence was incomplete.
+- No new dependencies, database migrations, API contracts, or production configuration changes.
+- Update PR #36 as the complete T17 deliverable after verification. Its resolving reference targets #24 only, after peer review and merge; story issues #1-#7 remain informational references.
