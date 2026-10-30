@@ -32,6 +32,23 @@ def home(request):
     )
 
 
+def idea_detail(request, idea_id):
+    idea = get_object_or_404(
+        Idea.objects.select_related("category"),
+        pk=idea_id,
+    )
+    can_edit = (
+        request.user.is_authenticated
+        and request.user.is_student
+        and idea.owner_id == request.user.pk
+    )
+    return render(
+        request,
+        "ideas/idea_detail.html",
+        {"idea": idea, "can_edit": can_edit},
+    )
+
+
 @login_required(login_url=reverse_lazy("accounts:login"))
 def publish_idea(request):
     if not request.user.is_student:

@@ -37,6 +37,17 @@ class HomePageTests(TestCase):
         response = self.client.get(reverse("ideas:home"))
         self.assertIn(idea, response.context["ideas"])
 
+    def test_idea_card_links_to_its_detail_page(self):
+        idea = Idea.objects.create(
+            title="Campus bike sharing",
+            description="Share bikes between faculties.",
+            owner=create_student(),
+        )
+
+        response = self.client.get(reverse("ideas:home"))
+
+        self.assertContains(response, reverse("ideas:detail", args=[idea.pk]))
+
     def test_category_filter_shows_only_ideas_in_selected_category(self):
         technology = Category.objects.create(name="Technology test")
         health = Category.objects.create(name="Health test")
@@ -116,6 +127,89 @@ class HomePageTests(TestCase):
         response = self.client.get(reverse("ideas:home"))
 
         self.assertContains(response, "No published ideas yet.")
+
+
+class IdeaDetailPageTests(TestCase):
+    def setUp(self):
+        self.owner = create_student()
+        self.category = Category.objects.create(name="Detail test category")
+        self.idea = Idea.objects.create(
+            title="Campus bike sharing",
+            description="Share bikes between faculties.\nInclude accessible options.",
+            owner=self.owner,
+            category=self.category,
+        )
+        self.url = reverse("ideas:detail", args=[self.idea.pk])
+
+    def test_detail_page_shows_title_full_description_and_category(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "ideas/idea_detail.html")
+        self.assertContains(response, self.idea.title)
+        self.assertContains(response, "Share bikes between faculties.")
+        self.assertContains(response, "Include accessible options.")
+        self.assertContains(response, self.category.name)
+
+    def test_detail_page_handles_idea_without_category(self):
+        idea_without_category = Idea.objects.create(
+            title="Category-free idea",
+            description="This idea has no category.",
+            owner=self.owner,
+        )
+
+        response = self.client.get(
+            reverse("ideas:detail", args=[idea_without_category.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, idea_without_category.title)
+        self.assertNotContains(response, "Detail test category")
+
+    def test_unknown_idea_returns_404(self):
+        response = self.client.get(reverse("ideas:detail", args=[999999]))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_owner_sees_edit_link(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, reverse("ideas:edit", args=[self.idea.pk]))
+
+    def test_unrelated_student_does_not_see_edit_link(self):
+        self.client.force_login(create_student("other@example.com"))
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("ideas:edit", args=[self.idea.pk]))
+
+    def test_investor_does_not_see_edit_link(self):
+        investor = User.objects.create_user(
+            email="detail-investor@example.com",
+            password="A-valid-password-123!",
+            name="Detail Investor",
+            role=User.Role.INVESTOR,
+        )
+        self.client.force_login(investor)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("ideas:edit", args=[self.idea.pk]))
+
+    def test_anonymous_visitor_can_view_page_without_edit_link(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("ideas:edit", args=[self.idea.pk]))
+
+    def test_detail_page_links_back_to_discovery(self):
+        response = self.client.get(self.url)
+
+        self.assertContains(response, reverse("ideas:home"))
 
 
 class CategoryModelTests(TestCase):
@@ -304,10 +398,14 @@ class EditIdeaTests(TestCase):
         self.assertContains(response, "Edit idea")
         self.assertContains(response, "Save changes")
 
-    def test_another_student_gets_403_for_get_and_post(self):
+    def test_another_student_gets_403_for_direct_edit_url_request(self):
         other = create_student("other@example.com")
         self.client.force_login(other)
         self.assertEqual(self.client.get(self.url).status_code, 403)
+
+    def test_another_student_gets_403_for_post_to_owner_edit_url(self):
+        other = create_student("other@example.com")
+        self.client.force_login(other)
         response = self.client.post(
             self.url, {"title": "Hijacked", "description": "Changed"}
         )

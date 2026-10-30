@@ -33,7 +33,13 @@
         <div class="col">
           <article class="card h-100">
             <div class="card-body">
-              <h2 class="h5 card-title">{{ idea.title }}</h2>
+              <h2 class="h5 card-title">
+                {% if idea.pk %}
+                  <a href="{% url 'ideas:detail' idea.pk %}">{{ idea.title }}</a>
+                {% else %}
+                  {{ idea.title }}
+                {% endif %}
+              </h2>
               <p class="card-text">{{ idea.description|linebreaksbr }}</p>
               {% if idea.category %}
                 <span class="badge text-bg-secondary">{% if idea.category.name %}{{ idea.category.name }}{% else %}{{ idea.category }}{% endif %}</span>
