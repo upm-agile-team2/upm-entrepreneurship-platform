@@ -6,7 +6,17 @@ from django.utils.translation import gettext_lazy as _
 from .models import User
 
 
-class EmailAuthenticationForm(AuthenticationForm):
+class BootstrapFormMixin:
+    """Keep authentication widgets consistent with the shared form presentation."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            style = "form-select" if isinstance(field.widget, forms.Select) else "form-control"
+            field.widget.attrs["class"] = style
+
+
+class EmailAuthenticationForm(BootstrapFormMixin, AuthenticationForm):
     username = forms.EmailField(
         label=_("Email"),
         widget=forms.EmailInput(attrs={"autocomplete": "email"}),
@@ -16,7 +26,7 @@ class EmailAuthenticationForm(AuthenticationForm):
         return self.cleaned_data["username"].strip().casefold()
 
 
-class SignUpForm(UserCreationForm):
+class SignUpForm(BootstrapFormMixin, UserCreationForm):
     class Meta:
         model = User
         fields = ("name", "email", "role", "password1", "password2")

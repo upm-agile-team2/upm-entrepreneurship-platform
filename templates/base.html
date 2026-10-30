@@ -1,16 +1,19 @@
 <!doctype html>
-{% load i18n %}
+{% load i18n static %}
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{% translate "UPM Ideas" %}{% endblock %}</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="{% static 'css/app.css' %}" rel="stylesheet">
 </head>
 <body>
-  <nav class="navbar navbar-expand-md navbar-dark bg-primary mb-4">
+  <a class="skip-link" href="#main-content">{% translate "Skip to content" %}</a>
+  <header class="site-header">
+  <nav class="navbar navbar-expand-md" aria-label="{% translate 'Main navigation' %}">
     <div class="container">
-      <a class="navbar-brand" href="{% url 'ideas:home' %}">{% translate "UPM Ideas" %}</a>
+      <a class="navbar-brand" href="{% url 'ideas:home' %}"><span class="brand-mark" aria-hidden="true"></span>{% translate "UPM Ideas" %}</a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#main-nav"
               aria-controls="main-nav" aria-expanded="false" aria-label="{% translate 'Toggle navigation' %}">
         <span class="navbar-toggler-icon"></span>
@@ -21,11 +24,11 @@
             {% if user.is_authenticated %}
               {% if user.is_student %}
                 <li class="nav-item">
-                  <a class="nav-link" href="{% url 'ideas:publish' %}">{% translate "Publish an idea" %}</a>
+                  <a class="nav-link nav-action" href="{% url 'ideas:publish' %}">{% translate "Publish an idea" %}</a>
                 </li>
               {% endif %}
               <li class="nav-item">
-                <span class="nav-link">
+                <span class="account-name">
                   {% blocktranslate with name=user.name role=user.get_role_display %}{{ name }} ({{ role }}){% endblocktranslate %}
                 </span>
               </li>
@@ -37,7 +40,7 @@
               </li>
             {% else %}
               <li class="nav-item">
-                <a class="nav-link" href="{% url 'accounts:login' %}">{% translate "Log in" %}</a>
+                <a class="nav-link nav-action" href="{% url 'accounts:login' %}">{% translate "Log in" %}</a>
               </li>
             {% endif %}
           {% endblock %}
@@ -45,8 +48,9 @@
       </div>
     </div>
   </nav>
+  </header>
 
-  <main class="container">
+  <main id="main-content" class="container app-main" tabindex="-1">
     {% if messages %}
       {% for message in messages %}
         <div class="alert alert-{{ message.tags|default:'info' }}" role="alert">{{ message }}</div>
@@ -54,6 +58,13 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+
+  <footer class="site-footer">
+    <div class="container footer-content">
+      <span class="footer-brand">{% translate "UPM Ideas" %}</span>
+      <span>{% translate "A space for ideas to grow." %}</span>
+    </div>
+  </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
