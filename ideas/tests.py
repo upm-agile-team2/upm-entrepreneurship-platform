@@ -1,4 +1,7 @@
+from io import StringIO
+
 from django.contrib.auth import get_user_model
+from django.core.management import CommandError, call_command
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase
@@ -6,6 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .forms import IdeaForm
+from .management.commands.seed_demo_ideas import DEMO_EMAIL_DOMAIN, DEMO_IDEAS
 from .models import Category, Idea
 
 User = get_user_model()
@@ -597,3 +601,60 @@ class DiscoveryPageTemplateTests(TestCase):
 
         self.assertContains(response, "word29 …")
         self.assertNotContains(response, "word30")
+
+
+class SeedDemoIdeasCommandTests(TestCase):
+    def run_command(self, *args):
+        out = StringIO()
+        call_command("seed_demo_ideas", *args, stdout=out)
+        return out.getvalue()
+
+    def test_creates_the_sample_ideas_in_every_category(self):
+        self.run_command()
+
+        self.assertEqual(Idea.objects.count(), len(DEMO_IDEAS))
+        used = set(Idea.objects.values_list("category__name", flat=True))
+        self.assertTrue({"Technology", "Health", "Education", "Sustainability", "Finance", "Social impact"} <= used)
+
+    def test_demo_authors_are_students_who_cannot_sign_in(self):
+        self.run_command()
+
+        authors = User.objects.filter(email__endswith=DEMO_EMAIL_DOMAIN)
+        self.assertEqual(authors.count(), 4)
+        for author in authors:
+            self.assertTrue(author.is_student)
+            self.assertFalse(author.has_usable_password())
+
+    def test_running_twice_does_not_duplicate_ideas(self):
+        self.run_command()
+        output = self.run_command()
+
+        self.assertEqual(Idea.objects.count(), len(DEMO_IDEAS))
+        self.assertIn("Created 0 sample ideas", output)
+
+    def test_sample_ideas_appear_on_the_discovery_page(self):
+        self.run_command()
+
+        response = self.client.get(reverse("ideas:home"))
+
+        self.assertContains(response, "Campus lost &amp; found app")
+
+    def test_remove_deletes_only_the_demo_data(self):
+        real_idea = Idea.objects.create(
+            title="Real idea",
+            description="Published by a real student.",
+            owner=create_student(),
+        )
+        self.run_command()
+
+        self.run_command("--remove")
+
+        self.assertEqual(list(Idea.objects.all()), [real_idea])
+        self.assertFalse(User.objects.filter(email__endswith=DEMO_EMAIL_DOMAIN).exists())
+
+    def test_missing_categories_stop_the_command(self):
+        Category.objects.filter(name="Finance").delete()
+
+        with self.assertRaisesMessage(CommandError, "Missing categories: Finance"):
+            self.run_command()
+        self.assertEqual(Idea.objects.count(), 0)

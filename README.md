@@ -101,6 +101,15 @@ python manage.py runserver
 
 The site runs at http://127.0.0.1:8000/.
 
+To fill the discovery page with 20 sample ideas for the demo and the user experiments (safe to run more than once):
+
+```bash
+python manage.py seed_demo_ideas           # add the sample ideas
+python manage.py seed_demo_ideas --remove  # delete them and their demo authors
+```
+
+The demo authors cannot sign in. The experiment guides are in `docs/experiments/`.
+
 Run the tests (GitHub Actions also runs them on every push to `main` and on every pull request):
 
 ```bash
@@ -116,6 +125,7 @@ python manage.py test
 | `ideas/` | Publishing, editing, browsing and viewing ideas (US001–US004) |
 | `templates/` | Shared templates; `base.html` loads Bootstrap and the navigation bar |
 | `openspec/` | OpenSpec specs, change proposals and configuration (see [OpenSpec workflow](#openspec-workflow)) |
+| `docs/experiments/` | Guides for the Sprint user experiments |
 
 ### Environment variables
 
