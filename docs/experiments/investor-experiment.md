@@ -63,13 +63,13 @@ Team members do not take part as participants.
 
 > "Thank you for helping us. We are testing a platform where UPM students publish entrepreneurial ideas so that investors can find them. We are testing the platform, not you: there are no wrong answers. Please think aloud while you use it. We will not record your name or any personal data."
 
-**Before the tasks.** Ask: *"Which sector or type of project would you be most interested in investing in or supporting?"* Write the answer down.
+**Before the tasks.** Show the categories available in the discovery filter (Technology, Health, Education, Sustainability, Finance, Social impact and Other). Ask: *"Which of these areas would you be most interested in investing in or supporting?"* Write the selected category down. This keeps the task aligned with the sample ideas available in the MVP.
 
 **Tasks.** Read each task, start the timer and do not help unless the participant is stuck for more than one minute (then write down that help was needed).
 
 | Task | Instruction to read | Completed when |
 |---|---|---|
-| T1 | "Find the ideas that belong to the sector you just mentioned." | The list shows only ideas from the matching category. |
+| T1 | "Find the ideas in [the selected category]." | The list shows only ideas from the selected category. |
 | T2 | "Open the idea that interests you most and read its details." | The idea detail page is open. |
 | T3 | "Now go back to all the ideas and look for one in a different sector." | The full list is shown again and another category is selected. |
 

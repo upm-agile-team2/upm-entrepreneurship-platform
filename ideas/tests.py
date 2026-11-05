@@ -1,7 +1,7 @@
 from io import StringIO
 import re
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.core.management import CommandError, call_command
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
@@ -10,7 +10,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .forms import IdeaForm
-from .management.commands.seed_demo_ideas import DEMO_EMAIL_DOMAIN, DEMO_IDEAS
+from .management.commands.seed_demo_ideas import (
+    DEMO_AUTHOR_KEY_PREFIX,
+    DEMO_IDEA_KEY_PREFIX,
+    DEMO_IDEAS,
+    DEMO_STUDENTS,
+    demo_email,
+)
 from .models import Category, Idea
 
 User = get_user_model()
@@ -619,23 +625,71 @@ class SeedDemoIdeasCommandTests(TestCase):
 
         self.assertEqual(Idea.objects.count(), len(DEMO_IDEAS))
         used = set(Idea.objects.values_list("category__name", flat=True))
-        self.assertTrue({"Technology", "Health", "Education", "Sustainability", "Finance", "Social impact"} <= used)
+        self.assertTrue(
+            {
+                "Technology",
+                "Health",
+                "Education",
+                "Sustainability",
+                "Finance",
+                "Social impact",
+                "Other",
+            }
+            <= used
+        )
 
     def test_demo_authors_are_students_who_cannot_sign_in(self):
         self.run_command()
 
-        authors = User.objects.filter(email__endswith=DEMO_EMAIL_DOMAIN)
+        authors = User.objects.filter(demo_key__startswith=DEMO_AUTHOR_KEY_PREFIX)
         self.assertEqual(authors.count(), 4)
         for author in authors:
             self.assertTrue(author.is_student)
             self.assertFalse(author.has_usable_password())
+            self.assertIsNone(authenticate(email=author.email, password="any-password"))
+
+    def test_rerun_restores_unusable_password_for_an_existing_demo_author(self):
+        self.run_command()
+        author = User.objects.get(demo_key=f"{DEMO_AUTHOR_KEY_PREFIX}lucia.moreno")
+        author.set_password("Temporary-password-123!")
+        author.save(update_fields=["password"])
+
+        self.run_command()
+
+        author.refresh_from_db()
+        self.assertFalse(author.has_usable_password())
+        self.assertIsNone(authenticate(email=author.email, password="Temporary-password-123!"))
 
     def test_running_twice_does_not_duplicate_ideas(self):
         self.run_command()
         output = self.run_command()
 
-        self.assertEqual(Idea.objects.count(), len(DEMO_IDEAS))
+        self.assertEqual(
+            Idea.objects.filter(demo_key__startswith=DEMO_IDEA_KEY_PREFIX).count(),
+            len(DEMO_IDEAS),
+        )
+        self.assertEqual(
+            User.objects.filter(demo_key__startswith=DEMO_AUTHOR_KEY_PREFIX).count(), 4
+        )
         self.assertIn("Created 0 sample ideas", output)
+
+    def test_rerun_after_idea_is_renamed_preserves_it_without_a_duplicate(self):
+        self.run_command()
+        idea = Idea.objects.get(demo_key=f"{DEMO_IDEA_KEY_PREFIX}campus-lost-found-app")
+        idea.title = "Community lost property board"
+        idea.description = "A revised description that a rerun should preserve."
+        idea.save(update_fields=["title", "description"])
+
+        self.run_command()
+
+        self.assertEqual(
+            Idea.objects.filter(demo_key=f"{DEMO_IDEA_KEY_PREFIX}campus-lost-found-app").count(),
+            1,
+        )
+        idea.refresh_from_db()
+        self.assertEqual(idea.title, "Community lost property board")
+        self.assertEqual(idea.description, "A revised description that a rerun should preserve.")
+        self.assertFalse(Idea.objects.filter(title="Campus lost & found app").exists())
 
     def test_sample_ideas_appear_on_the_discovery_page(self):
         self.run_command()
@@ -644,18 +698,206 @@ class SeedDemoIdeasCommandTests(TestCase):
 
         self.assertContains(response, "Campus lost &amp; found app")
 
-    def test_remove_deletes_only_the_demo_data(self):
+    def test_remove_deletes_marked_demo_ideas_and_unreferenced_demo_authors(self):
         real_idea = Idea.objects.create(
             title="Real idea",
             description="Published by a real student.",
             owner=create_student(),
         )
         self.run_command()
+        self.assertEqual(
+            Idea.objects.filter(demo_key__startswith=DEMO_IDEA_KEY_PREFIX).count(),
+            len(DEMO_IDEAS),
+        )
+        renamed_idea = Idea.objects.get(demo_key=f"{DEMO_IDEA_KEY_PREFIX}campus-lost-found-app")
+        renamed_idea.title = "Community lost property board"
+        renamed_idea.save(update_fields=["title"])
+
+        output = self.run_command("--remove")
+
+        self.assertEqual(list(Idea.objects.all()), [real_idea])
+        self.assertFalse(User.objects.filter(demo_key__startswith=DEMO_AUTHOR_KEY_PREFIX).exists())
+        self.assertIn("Removed 20 sample ideas and 4 demo authors", output)
+
+    def test_reserved_email_collision_aborts_without_creating_demo_records(self):
+        collision = User.objects.create_user(
+            email=demo_email(DEMO_STUDENTS[0][0]),
+            password="Real-account-password-123!",
+            name="Real Account",
+            role=User.Role.INVESTOR,
+        )
+
+        with self.assertRaisesMessage(CommandError, "identity mismatch"):
+            self.run_command()
+
+        collision.refresh_from_db()
+        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(Idea.objects.count(), 0)
+        self.assertFalse(User.objects.filter(demo_key__startswith=DEMO_AUTHOR_KEY_PREFIX).exists())
+
+    def test_reserved_email_collision_preserves_account_password_role_and_name(self):
+        collision = User.objects.create_user(
+            email=demo_email(DEMO_STUDENTS[0][0]),
+            password="Real-account-password-123!",
+            name="Real Account",
+            role=User.Role.INVESTOR,
+        )
+        real_idea = Idea.objects.create(
+            title="Account owner's existing idea",
+            description="This must survive a failed seed attempt.",
+            owner=collision,
+        )
+        original = (collision.password, collision.name, collision.role, collision.email)
+
+        with self.assertRaises(CommandError):
+            self.run_command()
+
+        collision.refresh_from_db()
+        self.assertEqual(
+            (collision.password, collision.name, collision.role, collision.email), original
+        )
+        self.assertTrue(collision.check_password("Real-account-password-123!"))
+        self.assertTrue(Idea.objects.filter(pk=real_idea.pk, owner=collision).exists())
+
+    def test_collision_late_in_author_list_does_not_partially_seed_earlier_authors(self):
+        User.objects.create_user(
+            email=demo_email(DEMO_STUDENTS[-1][0]),
+            password="Real-account-password-123!",
+            name="Existing Account",
+            role=User.Role.STUDENT,
+        )
+
+        with self.assertRaises(CommandError):
+            self.run_command()
+
+        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(Idea.objects.count(), 0)
+
+    def test_reserved_email_with_another_demo_key_is_rejected_without_changes(self):
+        account = User.objects.create_user(
+            email=demo_email(DEMO_STUDENTS[0][0]),
+            password="Existing-password-123!",
+            name="Mismatched Account",
+            role=User.Role.STUDENT,
+            demo_key=f"{DEMO_AUTHOR_KEY_PREFIX}not-lucia",
+        )
+        original = (account.email, account.name, account.password, account.demo_key)
+
+        with self.assertRaisesMessage(CommandError, "identity mismatch"):
+            self.run_command()
+
+        account.refresh_from_db()
+        self.assertEqual(
+            (account.email, account.name, account.password, account.demo_key), original
+        )
+        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(Idea.objects.count(), 0)
+
+    def test_demo_author_key_with_another_email_is_rejected_without_changes(self):
+        account = User.objects.create_user(
+            email="someone-else@example.com",
+            password="Existing-password-123!",
+            name="Mismatched Account",
+            role=User.Role.STUDENT,
+            demo_key=f"{DEMO_AUTHOR_KEY_PREFIX}{DEMO_STUDENTS[0][0]}",
+        )
+        original = (account.email, account.name, account.password, account.demo_key)
+
+        with self.assertRaisesMessage(CommandError, "identity mismatch"):
+            self.run_command()
+
+        account.refresh_from_db()
+        self.assertEqual(
+            (account.email, account.name, account.password, account.demo_key), original
+        )
+        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(Idea.objects.count(), 0)
+
+    def test_existing_demo_idea_key_with_unexpected_owner_is_rejected(self):
+        self.run_command()
+        idea = Idea.objects.get(demo_key=f"{DEMO_IDEA_KEY_PREFIX}campus-lost-found-app")
+        wrong_owner = User.objects.get(demo_key=f"{DEMO_AUTHOR_KEY_PREFIX}daniel.ruiz")
+        idea.owner = wrong_owner
+        idea.save(update_fields=["owner"])
+        original_idea_count = Idea.objects.count()
+        original_user_count = User.objects.count()
+
+        with self.assertRaisesMessage(CommandError, "ownership mismatch"):
+            self.run_command()
+
+        idea.refresh_from_db()
+        self.assertEqual(idea.owner, wrong_owner)
+        self.assertEqual(Idea.objects.count(), original_idea_count)
+        self.assertEqual(User.objects.count(), original_user_count)
+
+    def test_remove_ignores_an_unmarked_account_with_reserved_demo_email(self):
+        real_author = User.objects.create_user(
+            email=demo_email(DEMO_STUDENTS[0][0]),
+            password="Real-account-password-123!",
+            name="Real Account",
+            role=User.Role.STUDENT,
+        )
+        real_idea = Idea.objects.create(
+            title="Existing real idea",
+            description="This record predates the demo command.",
+            owner=real_author,
+        )
 
         self.run_command("--remove")
 
-        self.assertEqual(list(Idea.objects.all()), [real_idea])
-        self.assertFalse(User.objects.filter(email__endswith=DEMO_EMAIL_DOMAIN).exists())
+        self.assertTrue(User.objects.filter(pk=real_author.pk).exists())
+        self.assertTrue(Idea.objects.filter(pk=real_idea.pk).exists())
+
+    def test_remove_preserves_unrelated_ideas_owned_by_demo_authors(self):
+        self.run_command()
+        demo_author = User.objects.get(demo_key=f"{DEMO_AUTHOR_KEY_PREFIX}lucia.moreno")
+        unrelated_idea = Idea.objects.create(
+            title="Admin-created follow-up",
+            description="This is not a seeded sample idea.",
+            owner=demo_author,
+        )
+
+        self.run_command("--remove")
+
+        self.assertTrue(Idea.objects.filter(pk=unrelated_idea.pk).exists())
+        self.assertTrue(User.objects.filter(pk=demo_author.pk).exists())
+        self.assertFalse(
+            Idea.objects.filter(demo_key__startswith=DEMO_IDEA_KEY_PREFIX).exists()
+        )
+        self.assertEqual(
+            User.objects.filter(demo_key__startswith=DEMO_AUTHOR_KEY_PREFIX).count(), 1
+        )
+
+    def test_remove_preserves_unlisted_records_sharing_demo_key_prefixes(self):
+        self.run_command()
+        extra_author_key = f"{DEMO_AUTHOR_KEY_PREFIX}archived-contributor"
+        extra_idea_key = f"{DEMO_IDEA_KEY_PREFIX}archived-proposal"
+        extra_author = User.objects.create_user(
+            email="archived-contributor@example.com",
+            password=None,
+            name="Archived Contributor",
+            role=User.Role.STUDENT,
+            demo_key=extra_author_key,
+        )
+        extra_idea = Idea.objects.create(
+            title="Archived proposal",
+            description="Not part of this command's current fixture.",
+            owner=extra_author,
+            demo_key=extra_idea_key,
+        )
+        expected_author_keys = [
+            f"{DEMO_AUTHOR_KEY_PREFIX}{username}" for username, _ in DEMO_STUDENTS
+        ]
+        expected_idea_keys = [
+            f"{DEMO_IDEA_KEY_PREFIX}{idea_key}" for idea_key, *_ in DEMO_IDEAS
+        ]
+
+        self.run_command("--remove")
+
+        self.assertFalse(User.objects.filter(demo_key__in=expected_author_keys).exists())
+        self.assertFalse(Idea.objects.filter(demo_key__in=expected_idea_keys).exists())
+        self.assertTrue(User.objects.filter(pk=extra_author.pk, demo_key=extra_author_key).exists())
+        self.assertTrue(Idea.objects.filter(pk=extra_idea.pk, demo_key=extra_idea_key).exists())
 
     def test_missing_categories_stop_the_command(self):
         Category.objects.filter(name="Finance").delete()
