@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="UPM ideaHub app icon blue tile">
+<rect x="2" y="2" width="252" height="252" rx="52" fill="#0072CE"/>
+<path d="M60 67h42v94c0 20 11 31 29 31 7 0 13-1 19-4v39c-11 5-23 8-36 8-35 0-54-20-54-56V67Z" fill="#FFFFFF"/>
+<path d="M161 105h40v117l-40 16V105Z" fill="#FFFFFF"/>
+<circle cx="181" cy="75" r="20" fill="#FFFFFF"/>
+</svg>

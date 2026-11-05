@@ -18,7 +18,7 @@ class AccountLoginView(LoginView):
 def signup(request):
     if request.user.is_authenticated:
         return redirect("ideas:home")
-    form = SignUpForm(request.POST or None)
+    form = SignUpForm(request.POST if request.method == "POST" else None)
     if request.method == "POST" and form.is_valid():
         user = form.save()
         login(request, user)
