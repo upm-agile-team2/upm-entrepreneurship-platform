@@ -1,0 +1,46 @@
+/* UPM ideaHub | UI design tokens | working version 1.1
+ * Digital choices inspired by institutional UPM blue/gray.
+ * These HEX values are NOT certified official UPM color values.
+ */
+:root {
+  --brand-primary: #0072CE;
+  --brand-primary-hover: #005DA8;
+  --brand-gray: #53565A;
+  --brand-ink: #404950;
+  --text-primary: #24313C;
+  --text-secondary: #5A6672;
+  --text-on-primary: #FFFFFF;
+  --surface-canvas: #F7FAFC;
+  --surface-card: #FFFFFF;
+  --surface-blue-soft: #EFF7FE;
+  --border-default: #DCE5EC;
+  --focus-ring: #0072CE;
+  --font-ui: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-size-body: 16px;
+  --line-height-body: 1.55;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-modal: 16px;
+  --radius-pill: 999px;
+  --shadow-subtle: 0 2px 9px rgb(22 47 68 / 5%);
+  --transition-ui: 160ms ease;
+}
+
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
