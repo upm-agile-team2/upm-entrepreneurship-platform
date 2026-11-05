@@ -43,6 +43,9 @@ class User(AbstractUser):
     name = models.CharField(_("name"), max_length=150)
     email = models.EmailField(_("email address"), unique=True)
     role = models.CharField(_("role"), max_length=20, choices=Role.choices)
+    demo_key = models.CharField(
+        _("demo key"), max_length=100, unique=True, null=True, blank=True, editable=False
+    )
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["name", "role"]
