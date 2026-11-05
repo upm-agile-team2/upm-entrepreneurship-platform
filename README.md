@@ -108,7 +108,7 @@ python manage.py seed_demo_ideas           # add the sample ideas
 python manage.py seed_demo_ideas --remove  # delete them and their demo authors
 ```
 
-The demo authors cannot sign in. The experiment guides are in `docs/experiments/`.
+The demo authors cannot sign in. The command tracks its own records with persistent demo keys. Re-running it preserves edits to existing sample ideas, including renamed titles, and does not create duplicate canonical ideas. `--remove` deletes only the exact demo idea and author keys defined by the command; it deletes marked demo authors only when they have no remaining unrelated ideas. Records created by an earlier version of this command have no ownership markers and are intentionally left untouched; review them manually before reseeding or cleanup. The experiment guides are in `docs/experiments/`.
 
 Run the tests (GitHub Actions also runs them on every push to `main` and on every pull request):
 

@@ -39,6 +39,9 @@ class Idea(models.Model):
         related_name="ideas",
     )
     published_at = models.DateTimeField(_("published at"), auto_now_add=True)
+    demo_key = models.CharField(
+        _("demo key"), max_length=100, unique=True, null=True, blank=True, editable=False
+    )
 
     class Meta:
         ordering = ["-published_at"]
