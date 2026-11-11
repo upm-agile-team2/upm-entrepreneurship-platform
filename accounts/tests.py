@@ -6,6 +6,7 @@ from django.urls import reverse
 
 from ideas.models import Idea
 
+from .forms import StudentProfileForm
 from .models import Skill, StudentProfile
 
 
@@ -416,3 +417,301 @@ class StudentProfileModelTests(TestCase):
         student.delete()
 
         self.assertFalse(StudentProfile.objects.filter(pk=profile.pk).exists())
+
+
+class StudentProfileFormTests(TestCase):
+    def create_user(self, email, role=User.Role.STUDENT):
+        return User.objects.create_user(
+            email=email,
+            password="A-valid-password-123!",
+            name="Profile Form User",
+            role=role,
+        )
+
+    def form_data(self, **overrides):
+        data = {
+            "bio": "Profile bio",
+            "portfolio_projects": '[{"title": "Project"}]',
+            "experience": '[{"role": "Volunteer"}]',
+        }
+        data.update(overrides)
+        return data
+
+    def test_form_selects_existing_skills_and_excludes_ownership(self):
+        student = self.create_user("form-student@example.com")
+        skill = Skill.objects.create(name="Python")
+        form = StudentProfileForm(
+            self.form_data(skills=[str(skill.pk)]),
+            instance=StudentProfile(user=student),
+        )
+
+        self.assertNotIn("user", form.fields)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(list(form.cleaned_data["skills"]), [skill])
+
+    def test_empty_skill_catalogue_has_no_selectable_skills(self):
+        form = StudentProfileForm()
+
+        self.assertEqual(form.fields["skills"].queryset.count(), 0)
+        self.assertFalse(form.fields["skills"].required)
+
+    def test_free_text_skill_value_is_rejected(self):
+        student = self.create_user("free-text-student@example.com")
+        form = StudentProfileForm(
+            self.form_data(skills=["Create a new skill"]),
+            instance=StudentProfile(user=student),
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("skills", form.errors)
+
+    def test_json_fields_normalize_blank_and_omitted_values_to_empty_lists(self):
+        student = self.create_user("json-empty-student@example.com")
+        for field_name in ("portfolio_projects", "experience"):
+            for input_value in ("", None):
+                with self.subTest(field=field_name, value=input_value):
+                    data = self.form_data()
+                    if input_value is None:
+                        data.pop(field_name)
+                    else:
+                        data[field_name] = input_value
+                    form = StudentProfileForm(
+                        data,
+                        instance=StudentProfile(user=student),
+                    )
+                    self.assertTrue(form.is_valid(), form.errors)
+                    self.assertEqual(form.cleaned_data[field_name], [])
+
+    def test_json_fields_accept_empty_arrays_and_arbitrary_list_items(self):
+        student = self.create_user("json-list-student@example.com")
+        for field_name in ("portfolio_projects", "experience"):
+            for raw, expected in (
+                ("[]", []),
+                ('["text", 3, {"nested": true}, null]', ["text", 3, {"nested": True}, None]),
+            ):
+                with self.subTest(field=field_name, value=raw):
+                    form = StudentProfileForm(
+                        self.form_data(**{field_name: raw}),
+                        instance=StudentProfile(user=student),
+                    )
+                    self.assertTrue(form.is_valid(), form.errors)
+                    self.assertEqual(form.cleaned_data[field_name], expected)
+
+    def test_json_fields_reject_malformed_and_non_list_values(self):
+        student = self.create_user("json-invalid-student@example.com")
+        for field_name in ("portfolio_projects", "experience"):
+            for raw in ("{broken", "{}", '"text"', "null", "3"):
+                with self.subTest(field=field_name, value=raw):
+                    form = StudentProfileForm(
+                        self.form_data(**{field_name: raw}),
+                        instance=StudentProfile(user=student),
+                    )
+                    self.assertFalse(form.is_valid())
+                    self.assertIn(field_name, form.errors)
+
+    def test_form_invokes_student_role_validation(self):
+        student = self.create_user("form-role-student@example.com")
+        student_form = StudentProfileForm(
+            self.form_data(), instance=StudentProfile(user=student)
+        )
+        self.assertTrue(student_form.is_valid(), student_form.errors)
+
+        investor = self.create_user("form-role-investor@example.com", User.Role.INVESTOR)
+        investor_form = StudentProfileForm(
+            self.form_data(), instance=StudentProfile(user=investor)
+        )
+        self.assertFalse(investor_form.is_valid())
+        self.assertIn("__all__", investor_form.errors)
+
+
+class StudentProfileWorkflowTests(TestCase):
+    password = "Profile-workflow-123!"
+
+    def create_user(self, email, role=User.Role.STUDENT):
+        return User.objects.create_user(
+            email=email,
+            password=self.password,
+            name="Profile Workflow User",
+            role=role,
+        )
+
+    def valid_data(self, **overrides):
+        data = {
+            "bio": "A student profile",
+            "portfolio_projects": '[{"name": "Prototype"}]',
+            "experience": '[{"position": "Volunteer"}]',
+        }
+        data.update(overrides)
+        return data
+
+    def setUp(self):
+        self.url = reverse("accounts:student_profile")
+        self.student = self.create_user("workflow-student@example.com")
+        self.client.force_login(self.student)
+
+    def test_get_does_not_create_profile_and_binds_current_student(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(StudentProfile.objects.count(), 0)
+        self.assertEqual(response.context["form"].instance.user, self.student)
+        self.assertTemplateUsed(response, "accounts/student_profile_form.html")
+
+    def test_get_retrieves_existing_profile_values_and_skills(self):
+        skill = Skill.objects.create(name="Research")
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            bio="Saved bio",
+            portfolio_projects=[{"name": "Saved project"}],
+            experience=[{"role": "Saved role"}],
+        )
+        profile.skills.add(skill)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.context["form"].instance.pk, profile.pk)
+        self.assertEqual(response.context["form"].initial["bio"], "Saved bio")
+        self.assertEqual(
+            response.context["form"].initial["portfolio_projects"],
+            [{"name": "Saved project"}],
+        )
+        self.assertEqual(list(response.context["form"].initial["skills"]), [skill])
+
+    def test_post_creates_profile_with_skills_and_json_values(self):
+        skill = Skill.objects.create(name="Research")
+        response = self.client.post(
+            self.url,
+            self.valid_data(skills=[str(skill.pk)]),
+        )
+
+        self.assertRedirects(response, self.url)
+        profile = StudentProfile.objects.get(user=self.student)
+        self.assertEqual(profile.portfolio_projects, [{"name": "Prototype"}])
+        self.assertEqual(profile.experience, [{"position": "Volunteer"}])
+        self.assertCountEqual(profile.skills.all(), [skill])
+
+    def test_post_updates_existing_profile_in_place(self):
+        previous_skill = Skill.objects.create(name="Python")
+        updated_skill = Skill.objects.create(name="Research")
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            bio="Old bio",
+            portfolio_projects=[{"name": "Old project"}],
+            experience=[{"role": "Old role"}],
+        )
+        profile.skills.add(previous_skill)
+
+        response = self.client.post(
+            self.url,
+            self.valid_data(
+                bio="Updated bio",
+                skills=[str(updated_skill.pk)],
+                portfolio_projects='[{"name": "Updated project"}]',
+                experience='[{"position": "Updated role"}]',
+            ),
+        )
+
+        self.assertRedirects(response, self.url)
+        profile.refresh_from_db()
+        self.assertEqual(profile.bio, "Updated bio")
+        self.assertEqual(profile.portfolio_projects, [{"name": "Updated project"}])
+        self.assertEqual(profile.experience, [{"position": "Updated role"}])
+        self.assertCountEqual(profile.skills.all(), [updated_skill])
+        self.assertEqual(StudentProfile.objects.filter(user=self.student).count(), 1)
+
+    def test_omitted_optional_fields_clear_existing_values_on_complete_submission(self):
+        skill = Skill.objects.create(name="Research")
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            bio="Existing bio",
+            portfolio_projects=[{"name": "Existing project"}],
+            experience=[{"role": "Existing role"}],
+        )
+        profile.skills.add(skill)
+
+        response = self.client.post(self.url, {})
+
+        self.assertRedirects(response, self.url)
+        profile.refresh_from_db()
+        self.assertEqual(profile.bio, "")
+        self.assertEqual(profile.portfolio_projects, [])
+        self.assertEqual(profile.experience, [])
+        self.assertFalse(profile.skills.exists())
+
+    def test_explicit_empty_skill_selection_clears_existing_skills(self):
+        skill = Skill.objects.create(name="Research")
+        profile = StudentProfile.objects.create(user=self.student)
+        profile.skills.add(skill)
+
+        response = self.client.post(self.url, self.valid_data(skills=""))
+
+        self.assertRedirects(response, self.url)
+        profile.refresh_from_db()
+        self.assertFalse(profile.skills.exists())
+
+    def test_invalid_json_does_not_persist_profile_changes(self):
+        original_skill = Skill.objects.create(name="Python")
+        different_skill = Skill.objects.create(name="Research")
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            bio="Keep this bio",
+            portfolio_projects=[{"name": "Keep this project"}],
+            experience=[{"role": "Keep this role"}],
+        )
+        profile.skills.add(original_skill)
+
+        response = self.client.post(
+            self.url,
+            self.valid_data(
+                bio="Should not save",
+                skills=[str(different_skill.pk)],
+                portfolio_projects="{}",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        profile.refresh_from_db()
+        self.assertEqual(profile.bio, "Keep this bio")
+        self.assertEqual(profile.portfolio_projects, [{"name": "Keep this project"}])
+        self.assertCountEqual(profile.skills.all(), [original_skill])
+
+    def test_other_http_methods_are_rejected(self):
+        self.assertEqual(self.client.put(self.url).status_code, 405)
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        self.client.logout()
+
+        response = self.client.get(self.url)
+
+        self.assertRedirects(response, f"{reverse('accounts:login')}?next={self.url}")
+
+    def test_investor_is_denied(self):
+        investor = self.create_user("workflow-investor@example.com", User.Role.INVESTOR)
+        self.client.force_login(investor)
+
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+        self.assertEqual(self.client.post(self.url, {}).status_code, 403)
+
+    def test_submitted_owner_or_profile_identifiers_cannot_target_another_student(self):
+        other_student = self.create_user("workflow-other@example.com")
+        other_profile = StudentProfile.objects.create(
+            user=other_student,
+            bio="Other student's data",
+            portfolio_projects=[{"name": "Other project"}],
+            experience=[],
+        )
+
+        response = self.client.post(
+            self.url,
+            self.valid_data(
+                user=str(other_student.pk),
+                profile=str(other_profile.pk),
+                bio="My own data",
+            ),
+        )
+
+        self.assertRedirects(response, self.url)
+        other_profile.refresh_from_db()
+        self.assertEqual(other_profile.bio, "Other student's data")
+        self.assertEqual(StudentProfile.objects.count(), 2)
+        self.assertEqual(StudentProfile.objects.get(user=self.student).bio, "My own data")
