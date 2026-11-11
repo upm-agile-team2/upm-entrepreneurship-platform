@@ -1,7 +1,7 @@
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from .models import Idea
+from .models import Feedback, Idea, Reply
 
 
 class IdeaForm(forms.ModelForm):
@@ -27,3 +27,44 @@ class IdeaForm(forms.ModelForm):
         for name in self.errors:
             widget = self.fields[name].widget
             widget.attrs["class"] = f"{widget.attrs.get('class', '')} is-invalid".strip()
+
+
+class FeedbackForm(forms.ModelForm):
+    class Meta:
+        model = Feedback
+        fields = ["text", "is_private"]
+        widgets = {
+            "text": forms.Textarea(
+                attrs={"class": "form-control", "rows": 4}
+            ),
+            "is_private": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+        }
+        error_messages = {
+            "text": {"required": _("Please enter feedback.")},
+        }
+
+    def clean_text(self):
+        text = self.cleaned_data["text"].strip()
+        if not text:
+            raise forms.ValidationError(_("Please enter feedback."))
+        return text
+
+
+class ReplyForm(forms.ModelForm):
+    class Meta:
+        model = Reply
+        fields = ["text"]
+        widgets = {
+            "text": forms.Textarea(
+                attrs={"class": "form-control", "rows": 3}
+            ),
+        }
+        error_messages = {
+            "text": {"required": _("Please enter a reply.")},
+        }
+
+    def clean_text(self):
+        text = self.cleaned_data["text"].strip()
+        if not text:
+            raise forms.ValidationError(_("Please enter a reply."))
+        return text

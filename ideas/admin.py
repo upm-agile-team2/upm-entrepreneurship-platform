@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Category, Feedback, Idea
+from .models import Category, Feedback, Idea, Reply
 
 
 @admin.register(Category)
@@ -17,4 +17,10 @@ class IdeaAdmin(admin.ModelAdmin):
 
 @admin.register(Feedback)
 class FeedbackAdmin(admin.ModelAdmin):
-    list_display = ["idea", "author", "timestamp"]
+    list_display = ["idea", "author", "is_private", "status", "timestamp"]
+    list_filter = ["is_private", "status"]
+
+
+@admin.register(Reply)
+class ReplyAdmin(admin.ModelAdmin):
+    list_display = ["feedback", "author", "timestamp"]
