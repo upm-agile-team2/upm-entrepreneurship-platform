@@ -2,6 +2,7 @@ from io import StringIO
 import re
 
 from django.contrib.auth import authenticate, get_user_model
+from django.core.exceptions import ValidationError
 from django.core.management import CommandError, call_command
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
@@ -17,7 +18,7 @@ from .management.commands.seed_demo_ideas import (
     DEMO_STUDENTS,
     demo_email,
 )
-from .models import Category, Idea
+from .models import Category, Feedback, Idea
 
 User = get_user_model()
 
@@ -270,6 +271,67 @@ class IdeaModelTests(TestCase):
         with self.assertRaises(ProtectedError):
             category.delete()
 
+
+class FeedbackModelTests(TestCase):
+    def setUp(self):
+        self.owner = create_student("feedback-idea-owner@example.com")
+        self.author = User.objects.create_user(
+            email="feedback-investor@example.com",
+            password="A-valid-password-123!",
+            name="Feedback Investor",
+            role=User.Role.INVESTOR,
+        )
+        self.idea = Idea.objects.create(
+            title="Campus bike sharing",
+            description="Share bikes between faculties.",
+            owner=self.owner,
+        )
+
+    def test_feedback_is_stored_with_idea_author_text_and_timestamp(self):
+        before = timezone.now()
+
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.author,
+            text="Consider a low-cost student subscription.",
+        )
+        feedback.refresh_from_db()
+
+        self.assertEqual(feedback.idea, self.idea)
+        self.assertEqual(feedback.author, self.author)
+        self.assertEqual(feedback.text, "Consider a low-cost student subscription.")
+        self.assertGreaterEqual(feedback.timestamp, before)
+        self.assertLessEqual(feedback.timestamp, timezone.now())
+
+    def test_empty_text_fails_model_validation(self):
+        feedback = Feedback(idea=self.idea, author=self.author, text="")
+
+        with self.assertRaisesMessage(ValidationError, "This field cannot be blank."):
+            feedback.full_clean()
+
+    def test_deleting_author_preserves_feedback_and_clears_author(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.author,
+            text="Useful feedback.",
+        )
+
+        self.author.delete()
+        feedback.refresh_from_db()
+
+        self.assertIsNone(feedback.author)
+        self.assertEqual(feedback.text, "Useful feedback.")
+
+    def test_deleting_idea_cascades_to_its_feedback(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.author,
+            text="Useful feedback.",
+        )
+
+        self.idea.delete()
+
+        self.assertFalse(Feedback.objects.filter(pk=feedback.pk).exists())
 
 class IdeaFormTests(TestCase):
     def test_valid_form_without_category(self):

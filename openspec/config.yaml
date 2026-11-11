@@ -55,7 +55,7 @@ rules:
     - Link the GitHub issue the change comes from (task and/or user story), e.g. "Refs #31" or "US001 (#4)"
     - State what is out of scope
   specs:
-    - Every requirement states its source as "Source: USxxx (#n)"
+    - 'Every requirement states its source as "Source: USxxx (#n)"'
     - Derive requirements from user-story acceptance criteria; do not invent requirements that are not in the issues
     - Write the Given part of a Given/When/Then criterion inside the WHEN bullet
   tasks:
