@@ -1,5 +1,7 @@
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.db.models.functions import Lower
@@ -75,3 +77,48 @@ class User(AbstractUser):
     @property
     def is_investor(self):
         return self.role == self.Role.INVESTOR
+
+
+class Skill(models.Model):
+    name = models.CharField(_("name"), max_length=100)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"),
+                name="accounts_skill_name_ci_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class StudentProfile(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("user"),
+        on_delete=models.CASCADE,
+        related_name="student_profile",
+    )
+    bio = models.TextField(_("bio"), blank=True)
+    skills = models.ManyToManyField(
+        Skill,
+        verbose_name=_("skills"),
+        related_name="profiles",
+    )
+    portfolio_projects = models.JSONField(
+        _("portfolio projects"), blank=True, default=list
+    )
+    experience = models.JSONField(_("experience"), blank=True, default=list)
+
+    def clean(self):
+        super().clean()
+        if self.user_id and not self.user.is_student:
+            raise ValidationError(
+                {"user": _("Only student accounts can have a student profile.")}
+            )
+
+    def __str__(self):
+        return f"{self.user} profile"

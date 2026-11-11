@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.utils.translation import gettext_lazy as _
 
-from .models import User
+from .models import Skill, StudentProfile, User
 
 @admin.register(User)
 class PlatformUserAdmin(UserAdmin):
@@ -20,3 +20,15 @@ class PlatformUserAdmin(UserAdmin):
             "fields": ("email", "name", "role", "password1", "password2"),
         }),
     )
+
+
+@admin.register(Skill)
+class SkillAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+
+@admin.register(StudentProfile)
+class StudentProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "bio")
+    filter_horizontal = ("skills",)

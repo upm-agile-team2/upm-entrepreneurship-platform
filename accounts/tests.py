@@ -1,9 +1,12 @@
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from ideas.models import Idea
+
+from .models import Skill, StudentProfile
 
 
 User = get_user_model()
@@ -330,3 +333,86 @@ class AnonymousAccessPolicyTests(TestCase):
         )
         self.client.force_login(user)
         self.assertEqual(self.client.get(reverse("ideas:home")).status_code, 200)
+
+
+class StudentProfileModelTests(TestCase):
+    def create_user(self, email, role=User.Role.STUDENT):
+        return User.objects.create_user(
+            email=email,
+            password="A-valid-password-123!",
+            name="Profile Test User",
+            role=role,
+        )
+
+    def test_profile_is_one_to_one_with_user_and_bio_is_optional(self):
+        student = self.create_user("profile-student@example.com")
+        profile = StudentProfile(user=student, bio="")
+
+        profile.full_clean()
+        profile.save()
+
+        self.assertEqual(student.student_profile, profile)
+        self.assertEqual(profile.bio, "")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            StudentProfile.objects.create(user=student)
+
+    def test_portfolio_and_experience_defaults_are_independent_empty_lists(self):
+        first = StudentProfile.objects.create(
+            user=self.create_user("profile-first@example.com")
+        )
+        second = StudentProfile.objects.create(
+            user=self.create_user("profile-second@example.com")
+        )
+
+        first.portfolio_projects.append({"title": "First project"})
+        first.experience.append({"role": "Volunteer"})
+        first.save(update_fields=["portfolio_projects", "experience"])
+        second.refresh_from_db()
+
+        self.assertEqual(first.portfolio_projects, [{"title": "First project"}])
+        self.assertEqual(first.experience, [{"role": "Volunteer"}])
+        self.assertEqual(second.portfolio_projects, [])
+        self.assertEqual(second.experience, [])
+
+    def test_profile_can_be_associated_with_multiple_skills(self):
+        profile = StudentProfile.objects.create(
+            user=self.create_user("profile-skills@example.com")
+        )
+        python = Skill.objects.create(name="Python")
+        design = Skill.objects.create(name="Design")
+
+        profile.skills.add(python, design)
+
+        self.assertCountEqual(profile.skills.all(), [python, design])
+        self.assertIn(profile, python.profiles.all())
+
+    def test_skill_names_are_unique_ignoring_case(self):
+        Skill.objects.create(name="Data Science")
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Skill.objects.create(name="data science")
+
+    def test_full_clean_accepts_student_and_rejects_investor_profiles(self):
+        student_profile = StudentProfile(
+            user=self.create_user("profile-valid-student@example.com")
+        )
+        student_profile.full_clean()
+
+        investor_profile = StudentProfile(
+            user=self.create_user(
+                "profile-investor@example.com", role=User.Role.INVESTOR
+            )
+        )
+        # save() does not call full_clean(); role validation is explicit.
+        with self.assertRaises(ValidationError) as context:
+            investor_profile.full_clean()
+
+        self.assertIn("user", context.exception.error_dict)
+
+    def test_deleting_user_cascades_to_student_profile(self):
+        student = self.create_user("profile-delete@example.com")
+        profile = StudentProfile.objects.create(user=student)
+
+        student.delete()
+
+        self.assertFalse(StudentProfile.objects.filter(pk=profile.pk).exists())
