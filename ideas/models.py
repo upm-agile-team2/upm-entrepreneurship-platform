@@ -48,3 +48,27 @@ class Idea(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class Feedback(models.Model):
+    idea = models.ForeignKey(
+        Idea,
+        verbose_name=_("idea"),
+        on_delete=models.CASCADE,
+        related_name="feedback",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("author"),
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="feedback",
+    )
+    text = models.TextField(_("text"), blank=False)
+    timestamp = models.DateTimeField(_("timestamp"), auto_now_add=True)
+
+    class Meta:
+        ordering = ["timestamp"]
+
+    def __str__(self):
+        return f"Feedback on {self.idea}"

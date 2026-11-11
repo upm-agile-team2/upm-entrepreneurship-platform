@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Category, Idea
+from .models import Category, Feedback, Idea
 
 
 @admin.register(Category)
@@ -13,3 +13,8 @@ class IdeaAdmin(admin.ModelAdmin):
     list_display = ["title", "category", "owner", "published_at"]
     list_filter = ["category"]
     search_fields = ["title", "description"]
+
+
+@admin.register(Feedback)
+class FeedbackAdmin(admin.ModelAdmin):
+    list_display = ["idea", "author", "timestamp"]
