@@ -1,11 +1,15 @@
 from django.contrib import messages
 from django.contrib.auth import login
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, LogoutView
+from django.core.exceptions import PermissionDenied
+from django.views.decorators.http import require_http_methods
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.utils.translation import gettext_lazy as _
 
-from .forms import EmailAuthenticationForm, SignUpForm
+from .forms import EmailAuthenticationForm, SignUpForm, StudentProfileForm
+from .models import StudentProfile
 
 
 class AccountLoginView(LoginView):
@@ -29,3 +33,29 @@ def signup(request):
 
 class AccountLogoutView(LogoutView):
     next_page = reverse_lazy("ideas:home")
+
+
+@require_http_methods(["GET", "POST"])
+@login_required(login_url=reverse_lazy("accounts:login"))
+def student_profile(request):
+    if not request.user.is_student:
+        raise PermissionDenied
+
+    try:
+        profile = request.user.student_profile
+    except StudentProfile.DoesNotExist:
+        profile = StudentProfile(user=request.user)
+
+    form = StudentProfileForm(
+        request.POST if request.method == "POST" else None,
+        instance=profile,
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return redirect("accounts:student_profile")
+
+    return render(
+        request,
+        "accounts/student_profile_form.html",
+        {"form": form, "profile": profile},
+    )
