@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Discover students" %} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section aria-labelledby="student-discovery-title">
+    <header class="discovery-hero">
+      <p class="eyebrow">{% translate "Talent meets opportunity" %}</p>
+      <h1 id="student-discovery-title">{% translate "Discover students" %}</h1>
+      <p class="page-intro">{% translate "Find the skills behind the ideas. Explore student profiles and discover people who share your interests." %}</p>
+    </header>
+
+    <form method="get" action="{% url 'accounts:student_discovery' %}" class="discovery-filter">
+      <div class="filter-field">
+        <label for="{{ filter_form.skill.id_for_label }}" class="form-label">{{ filter_form.skill.label }}</label>
+        {{ filter_form.skill }}
+        {% if filter_form.skill.errors %}
+          <div class="invalid-feedback" role="alert">{{ filter_form.skill.errors }}</div>
+        {% endif %}
+        <p class="form-text mb-0" id="{{ filter_form.skill.auto_id }}_helptext">{{ filter_form.skill.help_text }}</p>
+      </div>
+      <div class="filter-actions">
+        <button type="submit" class="btn btn-primary">{% translate "Apply filter" %}</button>
+        {% if has_filter %}
+          <a href="{% url 'accounts:student_discovery' %}" class="btn btn-outline-secondary">{% translate "Clear filter" %}</a>
+        {% endif %}
+      </div>
+    </form>
+
+    <div class="section-heading">
+      <h2>{% translate "Student profiles" %}</h2>
+      <p class="student-discovery-count mb-0" role="status">
+        {% blocktranslate count counter=profile_count %}{{ counter }} profile{% plural %}{{ counter }} profiles{% endblocktranslate %}
+      </p>
+    </div>
+
+    {% if filter_form.errors %}
+      <div class="empty-state">
+        <h2>{% translate "Check your skill selection" %}</h2>
+        <p>{% translate "Choose a skill from the list, or clear the filter to explore all student profiles." %}</p>
+      </div>
+    {% elif profiles %}
+      <ul class="row g-4 list-unstyled mb-0">
+        {% for profile in profiles %}
+          <li class="col-12 col-md-6 col-xl-4">
+            <article class="card h-100 student-discovery-card" aria-labelledby="student-{{ profile.user_id }}">
+              <div class="card-body">
+                <h3 id="student-{{ profile.user_id }}" class="student-discovery-name">
+                  <a href="{% url 'accounts:investor_profile' profile.user_id %}">{{ profile.user.name }}</a>
+                </h3>
+                <p class="student-discovery-bio">
+                  {% if profile.bio %}{{ profile.bio|truncatechars:160 }}{% else %}{% translate "This student is still building their profile." %}{% endif %}
+                </p>
+                {% if profile.skills.all %}
+                  <ul class="list-unstyled d-flex flex-wrap gap-2 mb-0" aria-label="{% translate 'Skills' %}">
+                    {% for skill in profile.skills.all %}
+                      <li><span class="badge text-bg-secondary">{{ skill.name }}</span></li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="text-body-secondary small mb-0">{% translate "No skills added yet." %}</p>
+                {% endif %}
+                <div class="student-discovery-actions">
+                  <a class="btn btn-outline-secondary" href="{% url 'accounts:investor_profile' profile.user_id %}" aria-label="{% blocktranslate with name=profile.user.name %}View profile of {{ name }}{% endblocktranslate %}">{% translate "View profile" %}</a>
+                </div>
+              </div>
+            </article>
+          </li>
+        {% endfor %}
+      </ul>
+    {% elif selected_skill %}
+      <div class="empty-state">
+        <h2>{% translate "No matching profiles" %}</h2>
+        <p>{% blocktranslate with skill=selected_skill.name %}No student profiles match {{ skill }} yet. Try another skill or clear the filter to explore all profiles.{% endblocktranslate %}</p>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <h2>{% translate "No student profiles yet" %}</h2>
+        <p>{% translate "Student profiles will appear here once students have saved their information. You can explore their ideas in the meantime." %}</p>
+        <a class="btn btn-primary mt-4" href="{% url 'ideas:home' %}">{% translate "Explore ideas" %}</a>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

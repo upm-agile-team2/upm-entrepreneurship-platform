@@ -32,6 +32,11 @@
         <ul class="navbar-nav ms-auto">
           {% block nav_links %}
             {% if user.is_authenticated %}
+              {% if user.is_investor %}
+                <li class="nav-item">
+                  <a class="nav-link" href="{% url 'accounts:student_discovery' %}"{% if request.resolver_match.view_name == 'accounts:student_discovery' %} aria-current="page"{% endif %}>{% translate "Students" %}</a>
+                </li>
+              {% endif %}
               {% if user.is_student %}
                 <li class="nav-item">
                   <a class="nav-link nav-action" href="{% url 'ideas:publish' %}">{% translate "Publish an idea" %}</a>
