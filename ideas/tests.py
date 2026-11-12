@@ -210,6 +210,30 @@ class IdeaDetailPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, reverse("ideas:edit", args=[self.idea.pk]))
 
+    def test_investor_can_follow_idea_author_to_profile(self):
+        investor = User.objects.create_user(
+            email="profile-link-investor@example.com",
+            password="A-valid-password-123!",
+            name="Profile Link Investor",
+            role=User.Role.INVESTOR,
+        )
+        profile_url = reverse("accounts:investor_profile", args=[self.owner.pk])
+        self.client.force_login(investor)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, f'href="{profile_url}"')
+        self.assertContains(response, self.owner.name)
+
+    def test_student_and_anonymous_visitors_do_not_see_investor_profile_link(self):
+        profile_url = reverse("accounts:investor_profile", args=[self.owner.pk])
+        anonymous_response = self.client.get(self.url)
+        self.assertNotContains(anonymous_response, profile_url)
+
+        self.client.force_login(create_student("profile-link-student@example.com"))
+        student_response = self.client.get(self.url)
+        self.assertNotContains(student_response, profile_url)
+
     def test_anonymous_visitor_can_view_page_without_edit_link(self):
         response = self.client.get(self.url)
 

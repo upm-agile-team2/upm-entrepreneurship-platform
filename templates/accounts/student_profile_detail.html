@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{{ student.name }} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section aria-labelledby="profile-title">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+      <div>
+        <p class="eyebrow">{% translate "Student profile" %}</p>
+        <h1 id="profile-title">{{ student.name }}</h1>
+      </div>
+      {% if is_own_profile %}
+        <a class="btn btn-primary" href="{% url 'accounts:student_profile' %}">{% translate "Edit profile" %}</a>
+      {% endif %}
+    </div>
+
+    {% if not profile %}
+      <div class="alert alert-info" role="status">
+        {% if is_own_profile %}
+          {% translate "You have not added profile information yet." %}
+          <a href="{% url 'accounts:student_profile' %}">{% translate "Create your profile" %}</a>
+        {% else %}
+          {% translate "This student has not added profile information yet." %}
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="row g-4">
+        <div class="col-12">
+          <section class="card h-100" aria-labelledby="profile-bio-title">
+            <div class="card-body">
+              <h2 id="profile-bio-title" class="h4">{% translate "About" %}</h2>
+              {% if profile.bio %}<p class="mb-0">{{ profile.bio|linebreaksbr }}</p>{% else %}<p class="text-body-secondary mb-0">{% translate "No bio added yet." %}</p>{% endif %}
+            </div>
+          </section>
+        </div>
+        <div class="col-12 col-lg-4">
+          <section class="card h-100" aria-labelledby="profile-skills-title">
+            <div class="card-body">
+              <h2 id="profile-skills-title" class="h4">{% translate "Skills" %}</h2>
+              {% if skills %}
+                <ul class="list-unstyled d-flex flex-wrap gap-2 mb-0">
+                  {% for skill in skills %}<li><span class="badge text-bg-secondary">{{ skill.name }}</span></li>{% endfor %}
+                </ul>
+              {% else %}
+                <p class="text-body-secondary mb-0">{% translate "No skills added yet." %}</p>
+              {% endif %}
+            </div>
+          </section>
+        </div>
+        <div class="col-12 col-lg-4">
+          <section class="card h-100" aria-labelledby="profile-projects-title">
+            <div class="card-body">
+              <h2 id="profile-projects-title" class="h4">{% translate "Portfolio projects" %}</h2>
+              {% if portfolio_projects %}
+                <ul class="list-unstyled mb-0">
+                  {% for project in portfolio_projects %}<li class="mb-3"><pre class="mb-0 text-break">{{ project }}</pre></li>{% endfor %}
+                </ul>
+              {% else %}
+                <p class="text-body-secondary mb-0">{% translate "No projects added yet." %}</p>
+              {% endif %}
+            </div>
+          </section>
+        </div>
+        <div class="col-12 col-lg-4">
+          <section class="card h-100" aria-labelledby="profile-experience-title">
+            <div class="card-body">
+              <h2 id="profile-experience-title" class="h4">{% translate "Experience" %}</h2>
+              {% if experience_entries %}
+                <ul class="list-unstyled mb-0">
+                  {% for entry in experience_entries %}<li class="mb-3"><pre class="mb-0 text-break">{{ entry }}</pre></li>{% endfor %}
+                </ul>
+              {% else %}
+                <p class="text-body-secondary mb-0">{% translate "No experience added yet." %}</p>
+              {% endif %}
+            </div>
+          </section>
+        </div>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

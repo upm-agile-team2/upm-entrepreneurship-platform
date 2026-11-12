@@ -114,6 +114,14 @@ class StudentProfileForm(BootstrapFormMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["skills"].queryset = Skill.objects.all()
+        self.fields["portfolio_projects"].help_text = _(
+            "Enter a JSON array. Items may be any JSON values; leave blank if there are none."
+        )
+        self.fields["experience"].help_text = _(
+            "Enter a JSON array. Items may be any JSON values; leave blank if there are none."
+        )
+        if not self.fields["skills"].queryset.exists():
+            self.fields["skills"].help_text = _("No skills are available to select yet.")
 
     def _update_errors(self, errors):
         # StudentProfile.clean() reports an invalid role on its excluded user

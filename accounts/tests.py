@@ -715,3 +715,166 @@ class StudentProfileWorkflowTests(TestCase):
         self.assertEqual(other_profile.bio, "Other student's data")
         self.assertEqual(StudentProfile.objects.count(), 2)
         self.assertEqual(StudentProfile.objects.get(user=self.student).bio, "My own data")
+
+
+class StudentProfilePresentationTests(TestCase):
+    password = "Profile-presentation-123!"
+
+    def create_user(self, email, role):
+        return User.objects.create_user(
+            email=email,
+            password=self.password,
+            name=f"{role.title()} Profile User",
+            role=role,
+        )
+
+    def setUp(self):
+        self.student = self.create_user("presentation-student@example.com", User.Role.STUDENT)
+        self.investor = self.create_user("presentation-investor@example.com", User.Role.INVESTOR)
+        self.own_profile_url = reverse("accounts:my_profile")
+        self.edit_url = reverse("accounts:student_profile")
+        self.investor_profile_url = reverse(
+            "accounts:investor_profile", args=[self.student.pk]
+        )
+
+    def test_student_can_view_own_profile_and_follow_edit_link(self):
+        skill = Skill.objects.create(name="Visual design")
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            bio="I design accessible tools.",
+            portfolio_projects=[{"title": "Route planner"}],
+            experience=[{"role": "Volunteer designer"}],
+        )
+        profile.skills.add(skill)
+        self.client.force_login(self.student)
+
+        response = self.client.get(self.own_profile_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "accounts/student_profile_detail.html")
+        self.assertContains(response, "I design accessible tools.")
+        self.assertContains(response, "Visual design")
+        self.assertContains(response, "Route planner")
+        self.assertContains(response, "Volunteer designer")
+        self.assertContains(response, self.edit_url)
+        self.assertNotContains(response, self.student.email)
+
+    def test_student_without_profile_sees_state_and_creation_link(self):
+        self.client.force_login(self.student)
+
+        response = self.client.get(self.own_profile_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "You have not added profile information yet.")
+        self.assertContains(response, "Create your profile")
+
+    def test_editor_uses_shared_styled_form_and_explains_json_inputs(self):
+        self.client.force_login(self.student)
+
+        response = self.client.get(self.edit_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="form-surface"')
+        self.assertContains(response, 'for="id_bio"')
+        self.assertContains(response, "Items may be any JSON values")
+        self.assertContains(response, "No skills are available to select yet.")
+        self.assertContains(response, self.own_profile_url)
+
+    def test_my_profile_navigation_is_student_only(self):
+        home_url = reverse("ideas:home")
+        self.client.force_login(self.student)
+        student_response = self.client.get(home_url)
+        self.assertContains(student_response, self.own_profile_url)
+
+        self.client.force_login(self.investor)
+        investor_response = self.client.get(home_url)
+        self.assertNotContains(investor_response, self.own_profile_url)
+
+        self.client.logout()
+        anonymous_response = self.client.get(home_url)
+        self.assertNotContains(anonymous_response, self.own_profile_url)
+
+    def test_invalid_editor_submission_shows_validation_errors(self):
+        self.client.force_login(self.student)
+
+        response = self.client.post(
+            self.edit_url,
+            {
+                "bio": "Updated bio",
+                "skills": [],
+                "portfolio_projects": "{invalid",
+                "experience": "[]",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter a valid JSON.")
+        self.assertFalse(StudentProfile.objects.filter(user=self.student).exists())
+
+    def test_investor_can_view_student_profile_without_private_or_edit_controls(self):
+        skill = Skill.objects.create(name="User research")
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            bio="Profile for investors.",
+            portfolio_projects=[{"title": "Research prototype"}],
+            experience=[{"role": "Lab assistant"}],
+        )
+        profile.skills.add(skill)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.investor_profile_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.student.name)
+        self.assertContains(response, "Profile for investors.")
+        self.assertContains(response, "User research")
+        self.assertContains(response, "Research prototype")
+        self.assertContains(response, "Lab assistant")
+        self.assertNotContains(response, self.student.email)
+        self.assertNotContains(response, self.edit_url)
+
+    def test_incomplete_and_absent_profiles_render_empty_states(self):
+        self.client.force_login(self.investor)
+
+        no_profile_response = self.client.get(self.investor_profile_url)
+        self.assertEqual(no_profile_response.status_code, 200)
+        self.assertContains(
+            no_profile_response,
+            "This student has not added profile information yet.",
+        )
+
+        empty_profile = StudentProfile.objects.create(user=self.student)
+        empty_profile_response = self.client.get(self.investor_profile_url)
+        self.assertEqual(empty_profile_response.status_code, 200)
+        self.assertContains(empty_profile_response, "No bio added yet.")
+        self.assertContains(empty_profile_response, "No skills added yet.")
+        self.assertContains(empty_profile_response, "No projects added yet.")
+        self.assertContains(empty_profile_response, "No experience added yet.")
+
+    def test_anonymous_users_are_redirected_from_both_profile_views(self):
+        for url in (self.own_profile_url, self.investor_profile_url):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertRedirects(
+                    response,
+                    f"{reverse('accounts:login')}?next={url}",
+                )
+
+    def test_investors_cannot_open_student_edit_or_own_profile_views(self):
+        self.client.force_login(self.investor)
+
+        self.assertEqual(self.client.get(self.edit_url).status_code, 403)
+        self.assertEqual(self.client.get(self.own_profile_url).status_code, 403)
+
+    def test_students_cannot_open_investor_profile_route(self):
+        self.client.force_login(self.student)
+
+        self.assertEqual(self.client.get(self.investor_profile_url).status_code, 403)
+
+    def test_investor_route_does_not_resolve_investors_or_unknown_users(self):
+        self.client.force_login(self.investor)
+
+        investor_url = reverse("accounts:investor_profile", args=[self.investor.pk])
+        missing_url = reverse("accounts:investor_profile", args=[999999])
+        self.assertEqual(self.client.get(investor_url).status_code, 404)
+        self.assertEqual(self.client.get(missing_url).status_code, 404)
