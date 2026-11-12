@@ -122,3 +122,28 @@ class StudentProfile(models.Model):
 
     def __str__(self):
         return f"{self.user} profile"
+
+
+class ProfileVisit(models.Model):
+    """One investor visit to a student's profile (US019, H3)."""
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("student"),
+        on_delete=models.CASCADE,
+        related_name="profile_visits",
+    )
+    visitor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("visitor"),
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="+",
+    )
+    visited_at = models.DateTimeField(_("visited at"), auto_now_add=True)
+
+    class Meta:
+        ordering = ["-visited_at"]
+
+    def __str__(self):
+        return f"{self.visitor} visited {self.student}"

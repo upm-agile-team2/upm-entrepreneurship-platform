@@ -7,7 +7,7 @@ from django.urls import reverse
 from ideas.models import Idea
 
 from .forms import StudentProfileForm
-from .models import Skill, StudentProfile
+from .models import ProfileVisit, Skill, StudentProfile
 
 
 User = get_user_model()
@@ -878,3 +878,103 @@ class StudentProfilePresentationTests(TestCase):
         missing_url = reverse("accounts:investor_profile", args=[999999])
         self.assertEqual(self.client.get(investor_url).status_code, 404)
         self.assertEqual(self.client.get(missing_url).status_code, 404)
+
+
+class ProfileVisitStatisticsTests(TestCase):
+    """US019 (#52): students see how many times investors visited their profile."""
+
+    password = "Profile-visits-123!"
+
+    def create_user(self, email, role):
+        return User.objects.create_user(
+            email=email,
+            password=self.password,
+            name=f"{role.title()} Visits User",
+            role=role,
+        )
+
+    def setUp(self):
+        self.student = self.create_user("visits-student@example.com", User.Role.STUDENT)
+        self.investor = self.create_user("visits-investor@example.com", User.Role.INVESTOR)
+        self.own_profile_url = reverse("accounts:my_profile")
+        self.investor_profile_url = reverse(
+            "accounts:investor_profile", args=[self.student.pk]
+        )
+
+    def test_investor_visit_is_recorded(self):
+        self.client.force_login(self.investor)
+
+        self.client.get(self.investor_profile_url)
+        self.client.get(self.investor_profile_url)
+
+        self.assertEqual(ProfileVisit.objects.filter(student=self.student).count(), 2)
+        self.assertEqual(ProfileVisit.objects.first().visitor, self.investor)
+
+    def test_visits_are_recorded_for_students_without_a_profile(self):
+        self.assertFalse(StudentProfile.objects.filter(user=self.student).exists())
+        self.client.force_login(self.investor)
+
+        self.client.get(self.investor_profile_url)
+
+        self.assertEqual(self.student.profile_visits.count(), 1)
+
+    def test_student_viewing_own_profile_is_not_a_visit(self):
+        self.client.force_login(self.student)
+
+        self.client.get(self.own_profile_url)
+
+        self.assertFalse(ProfileVisit.objects.exists())
+
+    def test_forbidden_or_anonymous_requests_are_not_visits(self):
+        other_student = self.create_user("visits-other@example.com", User.Role.STUDENT)
+
+        self.client.get(self.investor_profile_url)
+        self.client.force_login(other_student)
+        self.client.get(self.investor_profile_url)
+
+        self.assertFalse(ProfileVisit.objects.exists())
+
+    def test_student_sees_total_number_of_visits(self):
+        ProfileVisit.objects.create(student=self.student, visitor=self.investor)
+        ProfileVisit.objects.create(student=self.student, visitor=self.investor)
+        ProfileVisit.objects.create(student=self.student, visitor=self.investor)
+        self.client.force_login(self.student)
+
+        response = self.client.get(self.own_profile_url)
+
+        self.assertEqual(response.context["profile_visit_count"], 3)
+        self.assertContains(response, "Investors have visited your profile 3 times.")
+
+    def test_single_visit_uses_singular(self):
+        ProfileVisit.objects.create(student=self.student, visitor=self.investor)
+        self.client.force_login(self.student)
+
+        response = self.client.get(self.own_profile_url)
+
+        self.assertContains(response, "Investors have visited your profile 1 time.")
+
+    def test_new_profile_shows_zero_visits_state(self):
+        self.client.force_login(self.student)
+
+        response = self.client.get(self.own_profile_url)
+
+        self.assertEqual(response.context["profile_visit_count"], 0)
+        self.assertContains(response, "No visits have been recorded yet.")
+
+    def test_only_visits_to_own_profile_are_counted(self):
+        other_student = self.create_user("visits-counted@example.com", User.Role.STUDENT)
+        ProfileVisit.objects.create(student=other_student, visitor=self.investor)
+        self.client.force_login(self.student)
+
+        response = self.client.get(self.own_profile_url)
+
+        self.assertEqual(response.context["profile_visit_count"], 0)
+
+    def test_investors_do_not_see_the_visit_statistics(self):
+        ProfileVisit.objects.create(student=self.student, visitor=self.investor)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.investor_profile_url)
+
+        self.assertNotContains(response, "Profile visits")
+        self.assertNotContains(response, "No visits have been recorded yet.")
