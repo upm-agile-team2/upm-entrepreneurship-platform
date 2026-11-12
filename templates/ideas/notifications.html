@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Notifications" %} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section class="detail-surface" aria-labelledby="notifications-heading">
+    <header class="section-heading">
+      <h1 id="notifications-heading">{% translate "Notifications" %}</h1>
+    </header>
+
+    {% for notification in notification_items %}
+      <a
+        href="{% url 'ideas:open-notification' notification.pk %}"
+        class="d-block text-decoration-none border-bottom py-3{% if not notification.is_read %} fw-semibold{% endif %}"
+        {% if not notification.is_read %}aria-label="{% translate 'Unread notification' %}"{% endif %}
+      >
+        <span>
+          {% blocktranslate with idea_title=notification.feedback.idea.title %}
+            New feedback on "{{ idea_title }}"
+          {% endblocktranslate %}
+        </span>
+        <small class="d-block text-muted">
+          {% if notification.feedback.author %}
+            {% blocktranslate with author=notification.feedback.author.name %}
+              From {{ author }}
+            {% endblocktranslate %}
+            ·
+          {% endif %}
+          <time datetime="{{ notification.created_at|date:'c' }}">
+            {{ notification.created_at|date:"M j, Y" }}
+          </time>
+        </small>
+      </a>
+    {% empty %}
+      <div class="empty-state">
+        <h2>{% translate "No notifications yet" %}</h2>
+        <p>{% translate "You will see feedback notifications here." %}</p>
+      </div>
+    {% endfor %}
+  </section>
+{% endblock %}
