@@ -8,10 +8,10 @@ from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.utils.translation import gettext_lazy as _
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from .forms import EmailAuthenticationForm, SignUpForm, StudentProfileForm
-from .models import StudentProfile
+from .models import Follow, StudentProfile
 
 User = get_user_model()
 
@@ -110,3 +110,28 @@ def investor_profile(request, student_id):
     context = _profile_display_context(student)
     context["is_own_profile"] = False
     return render(request, "accounts/student_profile_detail.html", context)
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+@require_POST
+def follow_student(request, student_id):
+    if not request.user.is_investor:
+        raise PermissionDenied
+
+    student = get_object_or_404(User, pk=student_id, role=User.Role.STUDENT)
+    follow, created = Follow.objects.get_or_create(investor=request.user, student=student)
+    if created:
+        messages.success(request, _("You are now following %(name)s.") % {"name": student.name})
+    return redirect("accounts:investor_profile", student_id=student.pk)
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+@require_POST
+def unfollow_student(request, student_id):
+    if not request.user.is_investor:
+        raise PermissionDenied
+
+    student = get_object_or_404(User, pk=student_id, role=User.Role.STUDENT)
+    deleted, details = Follow.objects.filter(investor=request.user, student=student).delete()
+    if deleted:
+        messages.success(request, _("You have unfollowed %(name)s.") % {"name": student.name})
+    return redirect("accounts:investor_profile", student_id=student.pk)

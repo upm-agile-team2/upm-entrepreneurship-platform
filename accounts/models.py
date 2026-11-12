@@ -3,7 +3,7 @@ from django.contrib.auth.models import AbstractUser
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Q
+from django.db.models import F, Q
 from django.db.models.functions import Lower
 from django.utils.translation import gettext_lazy as _
 
@@ -122,3 +122,43 @@ class StudentProfile(models.Model):
 
     def __str__(self):
         return f"{self.user} profile"
+
+
+class Follow(models.Model):
+    investor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="followed_students",
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="investor_followers",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["investor", "student"],
+                name="accounts_follow_unique_pair",
+            ),
+            models.CheckConstraint(
+                condition=~Q(investor=F("student")),
+                name="accounts_follow_not_self",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.investor_id and not self.investor.is_investor:
+            errors["investor"] = _("Only investors can follow students.")
+        if self.student_id and not self.student.is_student:
+            errors["student"] = _("Only student accounts can be followed.")
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f"{self.investor} follows {self.student}"

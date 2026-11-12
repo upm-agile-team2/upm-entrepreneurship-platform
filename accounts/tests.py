@@ -7,7 +7,7 @@ from django.urls import reverse
 from ideas.models import Idea
 
 from .forms import StudentProfileForm
-from .models import Skill, StudentProfile
+from .models import Follow, Skill, StudentProfile
 
 
 User = get_user_model()
@@ -878,3 +878,143 @@ class StudentProfilePresentationTests(TestCase):
         missing_url = reverse("accounts:investor_profile", args=[999999])
         self.assertEqual(self.client.get(investor_url).status_code, 404)
         self.assertEqual(self.client.get(missing_url).status_code, 404)
+
+class FollowingTestDataMixin:
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.student = User.objects.create_user(
+            email="follow-student@example.com", name="Student One", role=User.Role.STUDENT
+        )
+        cls.other_student = User.objects.create_user(
+            email="follow-other-student@example.com", name="Student Two", role=User.Role.STUDENT
+        )
+        cls.investor = User.objects.create_user(
+            email="follow-investor@example.com", name="Investor One", role=User.Role.INVESTOR
+        )
+        cls.other_investor = User.objects.create_user(
+            email="follow-other-investor@example.com", name="Investor Two", role=User.Role.INVESTOR
+        )
+
+
+class FollowModelTests(FollowingTestDataMixin, TestCase):
+    def test_follow_accepts_valid_roles_without_requiring_profile_details(self):
+        follow = Follow(investor=self.investor, student=self.student)
+        follow.full_clean()
+        follow.save()
+
+        self.assertIsNotNone(follow.created_at)
+        self.assertFalse(StudentProfile.objects.filter(user=self.student).exists())
+
+    def test_database_rejects_duplicate_pairs_and_self_following(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+
+        for student in (self.student, self.investor):
+            with self.subTest(student=student.pk):
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    Follow.objects.create(investor=self.investor, student=student)
+
+    def test_validation_rejects_wrong_investor_and_student_roles(self):
+        for investor, student, field in (
+            (self.student, self.other_student, "investor"),
+            (self.investor, self.other_investor, "student"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(ValidationError) as error:
+                    Follow(investor=investor, student=student).full_clean()
+                self.assertIn(field, error.exception.message_dict)
+
+    def test_deleting_accounts_removes_only_their_relationships(self):
+        for investor in (self.investor, self.other_investor):
+            for student in (self.student, self.other_student):
+                Follow.objects.create(investor=investor, student=student)
+
+        self.student.delete()
+        self.assertEqual(Follow.objects.count(), 2)
+        self.investor.delete()
+        remaining = Follow.objects.get()
+        self.assertEqual(remaining.investor, self.other_investor)
+        self.assertEqual(remaining.student, self.other_student)
+
+
+class FollowActionTests(FollowingTestDataMixin, TestCase):
+    def setUp(self):
+        self.profile_url = reverse("accounts:investor_profile", args=[self.student.pk])
+        self.follow_url = reverse("accounts:follow_student", args=[self.student.pk])
+        self.unfollow_url = reverse("accounts:unfollow_student", args=[self.student.pk])
+
+    def test_follow_uses_session_investor_and_route_student(self):
+        self.client.force_login(self.investor)
+        response = self.client.post(
+            self.follow_url,
+            {"investor_id": self.other_investor.pk, "student_id": self.other_student.pk},
+        )
+
+        self.assertRedirects(response, self.profile_url)
+        follow = Follow.objects.get()
+        self.assertEqual(follow.investor, self.investor)
+        self.assertEqual(follow.student, self.student)
+
+    def test_repeated_follow_keeps_one_relationship(self):
+        self.client.force_login(self.investor)
+        for _ in range(2):
+            self.assertRedirects(self.client.post(self.follow_url), self.profile_url)
+        self.assertEqual(Follow.objects.count(), 1)
+
+    def test_repeated_unfollow_removes_only_current_investors_relationship(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+        other_follow = Follow.objects.create(investor=self.other_investor, student=self.student)
+        self.client.force_login(self.investor)
+
+        for _ in range(2):
+            response = self.client.post(self.unfollow_url, {"investor_id": self.other_investor.pk})
+            self.assertRedirects(response, self.profile_url)
+        self.assertEqual(list(Follow.objects.all()), [other_follow])
+
+    def test_investor_and_missing_targets_are_rejected(self):
+        self.client.force_login(self.investor)
+        for action in ("follow_student", "unfollow_student"):
+            for target in (self.other_investor.pk, 999999):
+                with self.subTest(action=action, target=target):
+                    response = self.client.post(reverse(f"accounts:{action}", args=[target]))
+                    self.assertEqual(response.status_code, 404)
+        self.assertFalse(Follow.objects.exists())
+
+    def test_anonymous_users_are_asked_to_sign_in(self):
+        for url in (self.follow_url, self.unfollow_url):
+            with self.subTest(url=url):
+                response = self.client.post(url)
+                self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+        self.assertFalse(Follow.objects.exists())
+
+    def test_students_cannot_follow_or_unfollow(self):
+        existing = Follow.objects.create(investor=self.investor, student=self.other_student)
+        self.client.force_login(self.student)
+        for url in (self.follow_url, self.unfollow_url):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertEqual(list(Follow.objects.all()), [existing])
+
+    def test_actions_reject_non_post_methods_without_changing_data(self):
+        existing = Follow.objects.create(investor=self.investor, student=self.student)
+        self.client.force_login(self.investor)
+        for url in (self.follow_url, self.unfollow_url):
+            for method in ("GET", "PUT", "DELETE"):
+                with self.subTest(url=url, method=method):
+                    self.assertEqual(self.client.generic(method, url).status_code, 405)
+        self.assertEqual(list(Follow.objects.all()), [existing])
+
+    def test_actions_require_csrf_tokens(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.investor)
+        for url in (self.follow_url, self.unfollow_url):
+            with self.subTest(url=url):
+                self.assertEqual(client.post(url).status_code, 403)
+        self.assertFalse(Follow.objects.exists())
+
+    def test_submitted_redirect_urls_are_ignored(self):
+        self.client.force_login(self.investor)
+        for url in (self.follow_url, self.unfollow_url):
+            with self.subTest(url=url):
+                response = self.client.post(url, {"next": "https://example.com/", "source": "//example.com/"})
+                self.assertRedirects(response, self.profile_url)
