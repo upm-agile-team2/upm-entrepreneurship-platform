@@ -22,6 +22,8 @@ A valid unused skill displays No matching profiles and keeps Clear filter availa
 
 The page uses existing blue branding and Bootstrap filter controls, a responsive one/two/three-column grid, visible keyboard focus and wrapping content. Shared navigation can wrap at tablet widths. No custom JavaScript is needed.
 
+The feedback Notifications navigation link is shown only to students, matching US008 (#46). Investor notification behavior is not added; notification storage and recipient isolation remain unchanged. The role-specific navigation test verifies Students for investors and Notifications for students.
+
 ## Acceptance coverage
 
 All tests below are in `accounts.test_discovery`.
@@ -47,7 +49,7 @@ The 23 focused tests also cover population boundaries, current skill edits, quer
 
 This change starts from main and does not depend on PR #91. That separate PR supplies following and the improved profile editor; they are visible once that PR is integrated. This change adds no database migration and does not seed or rewrite local data.
 
-One PR covers T37 (#69) and T38 (#70), referencing US012 (#50). Peer review, live visual review, agreed-wireframe confirmation, main integration and Product Owner acceptance remain follow-up conditions. Shared Sprint 2 tasks are not closed automatically.
+One PR covers T37 (#69) and T38 (#70), referencing US012 (#50), with the requested navigation follow-up referencing US008 (#46). Peer review, broader device review, agreed-wireframe confirmation, main integration and Product Owner acceptance remain follow-up conditions. Shared Sprint 2 tasks are not closed automatically.
 
 ## Verification - 12 November 2026
 
@@ -57,4 +59,5 @@ One PR covers T37 (#69) and T38 (#70), referencing US012 (#50). Peer review, liv
 - Strict validation passed for `filter-student-profiles`. Global validation reports 14 passing items and two existing missing-delta failures, `seed-demo-ideas` and `prepare-sprint2-experiments`; neither is changed here.
 - Working-tree and staged diff checks passed. Local credentials, databases and integration helpers remain excluded.
 - Live HTTP checks confirmed the anonymous directory request reaches sign-in and the server serves the directory styles. All account and idea table rows were unchanged across these read-only checks. Existing local data remains intact.
-- Rendered HTML coverage includes labels, error indication, filter selection, current navigation, card data, empty states and responsive grid classes. Browser/mobile appearance still requires the manual review above; no new automated browser review is claimed.
+- Rendered HTML coverage includes labels, error indication, filter selection, current navigation, card data, empty states and responsive grid classes. Local review accepted the discovery layout; the profile-detail JSON presentation remains covered by pending PR #91. Broader keyboard/mobile checks are documented above; no new automated browser review is claimed.
+- After the navigation follow-up, all 23 focused tests passed both on this branch and in the combined PR #91 checkout, including visibility of Notifications only to students.

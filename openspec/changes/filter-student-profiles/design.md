@@ -24,6 +24,8 @@ Use a ModelChoiceField with an optional skill and a GET parameter such as `?skil
 
 Put the form, eligible-profile query and view in a dedicated accounts discovery module, with focused tests in their own module. This limits overlap with PR #91. Reuse the existing Bootstrap form mixin, branding, filter components and profile-detail route. Add an investor-only Students navigation link independently of the student-only navigation block.
 
+After local review, show the existing feedback Notifications navigation entry only to students, matching US008 (#46). Investor reply notifications are not implemented or specified in the current backlog. This presentation adjustment leaves notification storage and recipient authorization unchanged.
+
 ### Read profiles efficiently without recording visits
 
 Select the user with each profile and prefetch skills. Sort by case-insensitive student name with user ID as a stable tie-breaker. Browsing or filtering only reads data. The existing investor profile route records visits when a result is opened; no new visit logic belongs in discovery.

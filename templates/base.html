@@ -50,16 +50,18 @@
                   {% blocktranslate with name=user.name role=user.get_role_display %}{{ name }} ({{ role }}){% endblocktranslate %}
                 </span>
               </li>
-              <li class="nav-item">
-                <a class="nav-link" href="{% url 'ideas:notifications' %}">
-                  {% translate "Notifications" %}
-                  {% if unread_notification_count %}
-                    <span class="badge text-bg-primary" aria-label="{% blocktranslate with count=unread_notification_count %}{{ count }} unread notifications{% endblocktranslate %}">
-                      {{ unread_notification_count }}
-                    </span>
-                  {% endif %}
-                </a>
-              </li>
+              {% if user.is_student %}
+                <li class="nav-item">
+                  <a class="nav-link" href="{% url 'ideas:notifications' %}">
+                    {% translate "Notifications" %}
+                    {% if unread_notification_count %}
+                      <span class="badge text-bg-primary" aria-label="{% blocktranslate with count=unread_notification_count %}{{ count }} unread notifications{% endblocktranslate %}">
+                        {{ unread_notification_count }}
+                      </span>
+                    {% endif %}
+                  </a>
+                </li>
+              {% endif %}
               <li class="nav-item">
                 <form method="post" action="{% url 'accounts:logout' %}">
                   {% csrf_token %}
