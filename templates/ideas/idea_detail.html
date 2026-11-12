@@ -15,7 +15,14 @@
     {% endif %}
     <h1 id="idea-title">{{ idea.title }}</h1>
     <div class="idea-meta detail-meta">
-      {% if idea.owner.name %}<span class="idea-author">{{ idea.owner.name }}</span><span aria-hidden="true">&middot;</span>{% endif %}
+      {% if idea.owner.name %}
+        {% if user.is_authenticated and user.is_investor and idea.owner.is_student %}
+          <a class="idea-author" href="{% url 'accounts:investor_profile' idea.owner.pk %}">{{ idea.owner.name }}</a>
+        {% else %}
+          <span class="idea-author">{{ idea.owner.name }}</span>
+        {% endif %}
+        <span aria-hidden="true">&middot;</span>
+      {% endif %}
       <time datetime="{{ idea.published_at|date:'c' }}">{{ idea.published_at|date:"M j, Y" }}</time>
     </div>
     </header>

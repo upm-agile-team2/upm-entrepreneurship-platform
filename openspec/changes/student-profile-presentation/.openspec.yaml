@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-12
+goal: Implement T33 (#65) and T34 (#66) for US009 (#47) and US010 (#48) without
+  changing profile data models.

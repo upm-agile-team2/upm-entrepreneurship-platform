@@ -34,7 +34,7 @@ def home(request):
 
 def idea_detail(request, idea_id):
     idea = get_object_or_404(
-        Idea.objects.select_related("category"),
+        Idea.objects.select_related("category", "owner"),
         pk=idea_id,
     )
     can_edit = (

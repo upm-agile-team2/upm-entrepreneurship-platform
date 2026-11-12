@@ -1,10 +1,24 @@
 {% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% if profile.pk %}{% translate "Edit your profile" %}{% else %}{% translate "Create your profile" %}{% endif %} | UPM ideaHub{% endblock %}
 
 {% block content %}
-  <h1>Student profile</h1>
-  <form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Save profile</button>
-  </form>
+  <section class="form-layout" aria-labelledby="profile-form-title">
+    <div class="form-header">
+      <p class="eyebrow">{% translate "Your profile" %}</p>
+      <h1 id="profile-form-title">{% if profile.pk %}{% translate "Edit your profile" %}{% else %}{% translate "Create your profile" %}{% endif %}</h1>
+      <p>{% translate "Share your bio, skills, projects, and experience with potential investors." %}</p>
+    </div>
+    <div class="form-surface">
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% include "includes/form_fields.html" %}
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">{% translate "Save profile" %}</button>
+          <a class="back-link" href="{% url 'accounts:my_profile' %}">{% translate "View your profile" %}</a>
+        </div>
+      </form>
+    </div>
+  </section>
 {% endblock %}
