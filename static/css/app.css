@@ -35,7 +35,8 @@ h1, h2, h3 { color: var(--app-ink); font-weight: 700; letter-spacing: -.025em; }
 .navbar-brand { display: inline-flex; align-items: center; margin: 0 24px 0 0; padding: 0; }
 .brand-picture { display: block; }
 .brand-logo { display: block; width: 164px; height: auto; object-fit: contain; }
-.navbar-nav { align-items: center; gap: 16px; }
+.navbar-collapse { min-width: 0; }
+.navbar-nav { align-items: center; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
 .navbar .nav-link { color: var(--app-muted); font-size: .9rem; font-weight: 600; }
 .navbar .nav-link:hover { color: var(--app-blue); }
 .navbar .nav-action { color: white; padding: 12px 16px; border-radius: var(--radius-control); background: var(--app-blue); }
@@ -63,6 +64,15 @@ h1, h2, h3 { color: var(--app-ink); font-weight: 700; letter-spacing: -.025em; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; gap: 16px; }
 .section-heading h2 { font-size: 1.3rem; margin: 0; letter-spacing: -.02em; }
 .section-caption { color: var(--app-muted); font-size: .82rem; }
+.student-discovery-count { flex-shrink: 0; color: var(--app-muted); font-size: .875rem; }
+.student-discovery-card { min-width: 0; border-color: var(--app-border); border-radius: var(--app-radius); background: var(--surface-card); }
+.student-discovery-card .card-body { display: flex; flex-direction: column; min-width: 0; padding: 24px; }
+.student-discovery-card:focus-within { outline: 3px solid var(--app-blue); outline-offset: 3px; }
+.student-discovery-name { font-size: 1.125rem; line-height: 1.4; margin-bottom: 12px; overflow-wrap: anywhere; }
+.student-discovery-name a { color: var(--app-ink); text-decoration: none; }
+.student-discovery-name a:hover { color: var(--app-blue); text-decoration: underline; }
+.student-discovery-bio { color: var(--app-muted); line-height: 1.6; margin-bottom: 16px; overflow-wrap: anywhere; }
+.student-discovery-actions { margin-top: auto; padding-top: 24px; }
 .idea-grid { --bs-gutter-x: 24px; --bs-gutter-y: 24px; }
 .idea-card { border: 1px solid var(--app-border); border-radius: var(--app-radius); background: var(--surface-card); min-height: 260px; transition: border-color var(--transition-ui); }
 .idea-card:hover { border-color: var(--app-blue); }
