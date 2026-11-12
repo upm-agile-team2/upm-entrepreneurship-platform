@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Following" %} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section aria-labelledby="following-title">
+    <header class="discovery-hero">
+      <p class="eyebrow">{% translate "Your network" %}</p>
+      <h1 id="following-title">{% translate "Students you follow" %}</h1>
+      <p class="page-intro">{% translate "Keep the students who interest you close. Revisit their profiles to explore their skills and projects." %}</p>
+    </header>
+
+    <ul class="row g-4 list-unstyled mb-0">
+      {% for follow in follows %}
+        {% with student=follow.student %}
+          <li class="col-12 col-md-6 col-xl-4">
+            <article class="card h-100 profile-card" aria-labelledby="followed-student-{{ student.pk }}">
+              <div class="card-body">
+                <h2 id="followed-student-{{ student.pk }}" class="profile-card-title">
+                  <a href="{% url 'accounts:investor_profile' student.pk %}">{{ student.name }}</a>
+                </h2>
+                {% with profile=student.student_profile %}
+                  <p class="profile-card-bio">
+                    {% if profile.bio %}{{ profile.bio|truncatechars:160 }}{% else %}{% translate "This student is still building their profile." %}{% endif %}
+                  </p>
+                  {% if profile.skills.all %}
+                    <ul class="list-unstyled d-flex flex-wrap gap-2 mb-0" aria-label="{% translate 'Skills' %}">
+                      {% for skill in profile.skills.all %}
+                        <li><span class="badge text-bg-secondary">{{ skill.name }}</span></li>
+                      {% endfor %}
+                    </ul>
+                  {% endif %}
+                {% endwith %}
+                <div class="profile-card-actions">
+                  <a class="btn btn-primary" href="{% url 'accounts:investor_profile' student.pk %}">{% translate "View profile" %}</a>
+                  <form method="post" action="{% url 'accounts:unfollow_student' student.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="source" value="following">
+                    <button type="submit" class="btn btn-outline-secondary" aria-label="{% blocktranslate with name=student.name %}Unfollow {{ name }}{% endblocktranslate %}">{% translate "Unfollow" %}</button>
+                  </form>
+                </div>
+              </div>
+            </article>
+          </li>
+        {% endwith %}
+      {% empty %}
+        <li class="col-12">
+          <div class="empty-state">
+            <h2>{% translate "You're not following any students yet." %}</h2>
+            <p>{% translate "Explore an idea, open its author's profile, and choose Follow to find them here." %}</p>
+            <a class="btn btn-primary mt-4" href="{% url 'ideas:home' %}">{% translate "Explore ideas" %}</a>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endblock %}

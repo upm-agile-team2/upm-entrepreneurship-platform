@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n static %}
 
 {% block title %}{% if profile.pk %}{% translate "Edit your profile" %}{% else %}{% translate "Create your profile" %}{% endif %} | UPM ideaHub{% endblock %}
 
@@ -13,7 +13,11 @@
     <div class="form-surface">
       <form method="post" novalidate>
         {% csrf_token %}
-        {% include "includes/form_fields.html" %}
+        <input type="hidden" name="profile_entries_editor" value="1">
+        {% if form.non_field_errors %}<div class="form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+        {% include "includes/form_fields.html" with form=profile_fields %}
+        {% include "accounts/includes/profile_entry_formset.html" with entry_formset=projects_formset title=_("Portfolio projects") add_label=_("Add project") field_errors=form.portfolio_projects.errors %}
+        {% include "accounts/includes/profile_entry_formset.html" with entry_formset=experience_formset title=_("Experience") add_label=_("Add experience") field_errors=form.experience.errors %}
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">{% translate "Save profile" %}</button>
           <a class="back-link" href="{% url 'accounts:my_profile' %}">{% translate "View your profile" %}</a>
@@ -21,4 +25,5 @@
       </form>
     </div>
   </section>
+  <script src="{% static 'js/profile-entries.js' %}?v=2" defer></script>
 {% endblock %}

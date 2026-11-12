@@ -1,0 +1,29 @@
+{% load i18n %}
+<div class="profile-entry-editor" role="group" aria-labelledby="{{ entry_form.prefix }}-entry-heading" data-entry-form data-existing="{{ entry_form.is_existing|yesno:'true,false' }}" data-has-errors="{{ entry_form.errors|yesno:'true,false' }}">
+  <h3 id="{{ entry_form.prefix }}-entry-heading" class="profile-entry-editor-title">{% if entry_form.is_existing %}{{ entry_form.preview.heading }}{% elif entry_form.kind == 'project' %}{% translate "New project" %}{% else %}{% translate "New experience" %}{% endif %}</h3>
+  {% if entry_form.non_field_errors %}<div class="form-errors" role="alert">{{ entry_form.non_field_errors }}</div>{% endif %}
+  {% if entry_form.read_only_entry %}
+    {% include "accounts/includes/profile_entry.html" with entry=entry_form.preview %}
+  {% else %}
+    {% for field in entry_form.visible_fields %}
+      {% if field.name != 'DELETE' %}
+        <div class="form-field">
+          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<div id="{{ field.auto_id }}_helptext" class="form-text">{{ field.help_text }}</div>{% endif %}
+          {% if field.errors %}<div id="{{ field.auto_id }}_error" class="invalid-feedback" role="alert">{{ field.errors }}</div>{% endif %}
+        </div>
+      {% endif %}
+    {% endfor %}
+    {% if entry_form.preview.details %}
+      <details class="profile-entry-extra">
+        <summary>{% translate "Additional saved information" %}</summary>
+        <dl class="profile-entry-details">{% for detail in entry_form.preview.details %}<dt>{{ detail.label }}</dt><dd>{{ detail.value|linebreaksbr }}</dd>{% endfor %}</dl>
+      </details>
+    {% endif %}
+  {% endif %}
+  <div class="form-check">
+    {{ entry_form.DELETE }}
+    <label class="form-check-label" for="{{ entry_form.DELETE.id_for_label }}">{{ entry_form.DELETE.label }}</label>
+  </div>
+</div>

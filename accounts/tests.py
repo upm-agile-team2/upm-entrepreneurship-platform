@@ -3,11 +3,12 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from ideas.models import Idea
 
 from .forms import StudentProfileForm
-from .models import ProfileVisit, Skill, StudentProfile
+from .models import Follow, ProfileVisit, Skill, StudentProfile
 
 
 User = get_user_model()
@@ -768,7 +769,7 @@ class StudentProfilePresentationTests(TestCase):
         self.assertContains(response, "You have not added profile information yet.")
         self.assertContains(response, "Create your profile")
 
-    def test_editor_uses_shared_styled_form_and_explains_json_inputs(self):
+    def test_editor_uses_styled_project_and_experience_fields(self):
         self.client.force_login(self.student)
 
         response = self.client.get(self.edit_url)
@@ -776,7 +777,11 @@ class StudentProfilePresentationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'class="form-surface"')
         self.assertContains(response, 'for="id_bio"')
-        self.assertContains(response, "Items may be any JSON values")
+        self.assertContains(response, "Project title")
+        self.assertContains(response, "Role")
+        self.assertNotContains(response, "Enter a JSON array")
+        self.assertNotContains(response, 'name="portfolio_projects"')
+        self.assertNotContains(response, 'name="experience"')
         self.assertContains(response, "No skills are available to select yet.")
         self.assertContains(response, self.own_profile_url)
 
@@ -878,6 +883,573 @@ class StudentProfilePresentationTests(TestCase):
         missing_url = reverse("accounts:investor_profile", args=[999999])
         self.assertEqual(self.client.get(investor_url).status_code, 404)
         self.assertEqual(self.client.get(missing_url).status_code, 404)
+
+
+class FollowingTestDataMixin:
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.student = User.objects.create_user(
+            email="follow-student@example.com", name="Student One", role=User.Role.STUDENT
+        )
+        cls.other_student = User.objects.create_user(
+            email="follow-other-student@example.com", name="Student Two", role=User.Role.STUDENT
+        )
+        cls.investor = User.objects.create_user(
+            email="follow-investor@example.com", name="Investor One", role=User.Role.INVESTOR
+        )
+        cls.other_investor = User.objects.create_user(
+            email="follow-other-investor@example.com", name="Investor Two", role=User.Role.INVESTOR
+        )
+
+
+class FollowModelTests(FollowingTestDataMixin, TestCase):
+    def test_follow_accepts_valid_roles_without_requiring_profile_details(self):
+        follow = Follow(investor=self.investor, student=self.student)
+        follow.full_clean()
+        follow.save()
+
+        self.assertIsNotNone(follow.created_at)
+        self.assertFalse(StudentProfile.objects.filter(user=self.student).exists())
+
+    def test_database_rejects_duplicate_pairs_and_self_following(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+
+        for student in (self.student, self.investor):
+            with self.subTest(student=student.pk):
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    Follow.objects.create(investor=self.investor, student=student)
+
+    def test_validation_rejects_wrong_investor_and_student_roles(self):
+        for investor, student, field in (
+            (self.student, self.other_student, "investor"),
+            (self.investor, self.other_investor, "student"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(ValidationError) as error:
+                    Follow(investor=investor, student=student).full_clean()
+                self.assertIn(field, error.exception.message_dict)
+
+    def test_deleting_accounts_removes_only_their_relationships(self):
+        for investor in (self.investor, self.other_investor):
+            for student in (self.student, self.other_student):
+                Follow.objects.create(investor=investor, student=student)
+
+        self.student.delete()
+        self.assertEqual(Follow.objects.count(), 2)
+        self.investor.delete()
+        remaining = Follow.objects.get()
+        self.assertEqual(remaining.investor, self.other_investor)
+        self.assertEqual(remaining.student, self.other_student)
+
+
+class FollowActionTests(FollowingTestDataMixin, TestCase):
+    def setUp(self):
+        self.profile_url = reverse("accounts:investor_profile", args=[self.student.pk])
+        self.follow_url = reverse("accounts:follow_student", args=[self.student.pk])
+        self.unfollow_url = reverse("accounts:unfollow_student", args=[self.student.pk])
+
+    def test_follow_uses_session_investor_and_route_student(self):
+        self.client.force_login(self.investor)
+        response = self.client.post(
+            self.follow_url,
+            {"investor_id": self.other_investor.pk, "student_id": self.other_student.pk},
+        )
+
+        self.assertRedirects(response, self.profile_url)
+        follow = Follow.objects.get()
+        self.assertEqual(follow.investor, self.investor)
+        self.assertEqual(follow.student, self.student)
+
+    def test_repeated_follow_keeps_one_relationship(self):
+        self.client.force_login(self.investor)
+        for _ in range(2):
+            self.assertRedirects(self.client.post(self.follow_url), self.profile_url)
+        self.assertEqual(Follow.objects.count(), 1)
+
+    def test_repeated_unfollow_removes_only_current_investors_relationship(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+        other_follow = Follow.objects.create(investor=self.other_investor, student=self.student)
+        self.client.force_login(self.investor)
+
+        for _ in range(2):
+            response = self.client.post(self.unfollow_url, {"investor_id": self.other_investor.pk})
+            self.assertRedirects(response, self.profile_url)
+        self.assertEqual(list(Follow.objects.all()), [other_follow])
+
+    def test_investor_and_missing_targets_are_rejected(self):
+        self.client.force_login(self.investor)
+        for action in ("follow_student", "unfollow_student"):
+            for target in (self.other_investor.pk, 999999):
+                with self.subTest(action=action, target=target):
+                    response = self.client.post(reverse(f"accounts:{action}", args=[target]))
+                    self.assertEqual(response.status_code, 404)
+        self.assertFalse(Follow.objects.exists())
+
+    def test_anonymous_users_are_asked_to_sign_in(self):
+        for url in (self.follow_url, self.unfollow_url):
+            with self.subTest(url=url):
+                response = self.client.post(url)
+                self.assertRedirects(response, f"{reverse('accounts:login')}?next={url}")
+        self.assertFalse(Follow.objects.exists())
+
+    def test_students_cannot_follow_or_unfollow(self):
+        existing = Follow.objects.create(investor=self.investor, student=self.other_student)
+        self.client.force_login(self.student)
+        for url in (self.follow_url, self.unfollow_url):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertEqual(list(Follow.objects.all()), [existing])
+
+    def test_actions_reject_non_post_methods_without_changing_data(self):
+        existing = Follow.objects.create(investor=self.investor, student=self.student)
+        self.client.force_login(self.investor)
+        for url in (self.follow_url, self.unfollow_url):
+            for method in ("GET", "PUT", "DELETE"):
+                with self.subTest(url=url, method=method):
+                    self.assertEqual(self.client.generic(method, url).status_code, 405)
+        self.assertEqual(list(Follow.objects.all()), [existing])
+
+    def test_actions_require_csrf_tokens(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.investor)
+        for url in (self.follow_url, self.unfollow_url):
+            with self.subTest(url=url):
+                self.assertEqual(client.post(url).status_code, 403)
+        self.assertFalse(Follow.objects.exists())
+
+    def test_submitted_redirect_urls_are_ignored(self):
+        self.client.force_login(self.investor)
+        for url in (self.follow_url, self.unfollow_url):
+            with self.subTest(url=url):
+                response = self.client.post(url, {"next": "https://example.com/", "source": "//example.com/"})
+                self.assertRedirects(response, self.profile_url)
+
+
+class FollowProfilePresentationTests(FollowingTestDataMixin, TestCase):
+    def setUp(self):
+        self.profile_url = reverse("accounts:investor_profile", args=[self.student.pk])
+        self.follow_url = reverse("accounts:follow_student", args=[self.student.pk])
+        self.unfollow_url = reverse("accounts:unfollow_student", args=[self.student.pk])
+
+    def test_incomplete_profile_offers_follow_without_creating_data(self):
+        self.client.force_login(self.investor)
+        response = self.client.get(self.profile_url)
+
+        self.assertContains(response, f'action="{self.follow_url}"')
+        self.assertContains(response, "csrfmiddlewaretoken")
+        self.assertNotContains(response, f'action="{self.unfollow_url}"')
+        self.assertContains(response, "This student has not added profile information yet.")
+        self.assertFalse(Follow.objects.exists())
+        self.assertFalse(StudentProfile.objects.exists())
+
+    def test_follow_control_reflects_only_the_current_investors_state(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+        self.client.force_login(self.investor)
+        response = self.client.get(self.profile_url)
+        self.assertContains(response, f'action="{self.unfollow_url}"')
+        self.assertNotContains(response, f'action="{self.follow_url}"')
+
+        self.client.force_login(self.other_investor)
+        other_response = self.client.get(self.profile_url)
+        self.assertContains(other_response, f'action="{self.follow_url}"')
+        self.assertNotContains(other_response, f'action="{self.unfollow_url}"')
+
+    def test_students_own_profiles_have_no_follow_controls(self):
+        self.client.force_login(self.student)
+        response = self.client.get(reverse("accounts:my_profile"))
+        self.assertNotContains(response, self.follow_url)
+        self.assertNotContains(response, self.unfollow_url)
+
+    def test_profile_forms_support_follow_and_unfollow_with_csrf_enforced(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.investor)
+        client.get(self.profile_url)
+        token = client.cookies["csrftoken"].value
+
+        followed = client.post(self.follow_url, {"csrfmiddlewaretoken": token})
+        self.assertRedirects(followed, self.profile_url)
+        self.assertTrue(Follow.objects.filter(investor=self.investor, student=self.student).exists())
+
+        unfollowed = client.post(self.unfollow_url, {"csrfmiddlewaretoken": token})
+        self.assertRedirects(unfollowed, self.profile_url)
+        self.assertFalse(Follow.objects.exists())
+
+
+class FollowingListTests(FollowingTestDataMixin, TestCase):
+    def setUp(self):
+        self.list_url = reverse("accounts:following")
+
+    def test_list_shows_only_current_investors_followed_students_and_profile_links(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+        Follow.objects.create(investor=self.other_investor, student=self.other_student)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertContains(response, self.student.name)
+        self.assertNotContains(response, self.other_student.name)
+        self.assertContains(response, reverse("accounts:investor_profile", args=[self.student.pk]))
+        self.assertNotContains(response, self.student.email)
+
+    def test_list_displays_available_bio_and_skills_and_escapes_profile_content(self):
+        profile = StudentProfile.objects.create(user=self.student, bio="<script>unsafe()</script> Robotics researcher.")
+        profile.skills.add(Skill.objects.create(name="Robotics"))
+        Follow.objects.create(investor=self.investor, student=self.student)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertContains(response, "Robotics researcher.")
+        self.assertContains(response, "Robotics")
+        self.assertContains(response, "&lt;script&gt;")
+        self.assertNotContains(response, "<script>unsafe()")
+
+    def test_list_handles_missing_and_empty_profiles(self):
+        StudentProfile.objects.create(user=self.other_student)
+        for student in (self.student, self.other_student):
+            Follow.objects.create(investor=self.investor, student=student)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertContains(response, "This student is still building their profile.", count=2)
+        self.assertContains(response, self.student.name)
+        self.assertContains(response, self.other_student.name)
+
+    def test_empty_list_explains_how_to_follow_and_links_to_ideas(self):
+        self.client.force_login(self.investor)
+        response = self.client.get(self.list_url)
+        self.assertContains(response, "You're not following any students yet.")
+        self.assertContains(response, 'href="' + reverse("ideas:home") + '"')
+        self.assertFalse(Follow.objects.exists())
+
+    def test_list_order_is_latest_follow_first_with_stable_ties(self):
+        first = Follow.objects.create(investor=self.investor, student=self.student)
+        second = Follow.objects.create(investor=self.investor, student=self.other_student)
+        Follow.objects.update(created_at=timezone.now())
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(list(response.context["follows"]), [second, first])
+
+    def test_following_page_requires_an_investor_session_and_get(self):
+        self.assertRedirects(
+            self.client.get(self.list_url), f"{reverse('accounts:login')}?next={self.list_url}"
+        )
+        self.client.force_login(self.student)
+        self.assertEqual(self.client.get(self.list_url).status_code, 403)
+        self.client.force_login(self.investor)
+        self.assertEqual(self.client.post(self.list_url).status_code, 405)
+
+    def test_following_navigation_is_investor_only(self):
+        home_url = reverse("ideas:home")
+        self.assertNotContains(self.client.get(home_url), self.list_url)
+        self.client.force_login(self.student)
+        self.assertNotContains(self.client.get(home_url), self.list_url)
+        self.client.force_login(self.investor)
+        self.assertContains(self.client.get(home_url), self.list_url)
+
+    def test_accounts_that_are_no_longer_students_are_not_listed(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+        self.student.role = User.Role.INVESTOR
+        self.student.save(update_fields=["role"])
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertContains(response, "You're not following any students yet.")
+        self.assertNotContains(response, reverse("accounts:investor_profile", args=[self.student.pk]))
+
+
+class FollowingAcceptanceTests(FollowingTestDataMixin, TestCase):
+    def test_investor_follows_lists_and_unfollows_from_student_profile(self):
+        idea = Idea.objects.create(owner=self.student, title="A student project", description="A project to explore.")
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.investor)
+        profile_url = reverse("accounts:investor_profile", args=[self.student.pk])
+        follow_url = reverse("accounts:follow_student", args=[self.student.pk])
+        unfollow_url = reverse("accounts:unfollow_student", args=[self.student.pk])
+        list_url = reverse("accounts:following")
+
+        detail = client.get(reverse("ideas:detail", args=[idea.pk]))
+        self.assertContains(detail, profile_url)
+        profile = client.get(profile_url)
+        self.assertContains(profile, f'action="{follow_url}"')
+        token = client.cookies["csrftoken"].value
+
+        followed = client.post(follow_url, {"csrfmiddlewaretoken": token}, follow=True)
+        self.assertContains(followed, f'action="{unfollow_url}"')
+        listed = client.get(list_url)
+        self.assertContains(listed, self.student.name)
+        self.assertContains(listed, profile_url)
+
+        unfollowed = client.post(unfollow_url, {"csrfmiddlewaretoken": token}, follow=True)
+        self.assertContains(unfollowed, f'action="{follow_url}"')
+        self.assertContains(client.get(list_url), "You're not following any students yet.")
+        self.assertFalse(Follow.objects.exists())
+
+    def test_unfollow_from_list_updates_collection_and_preserves_other_investors(self):
+        for student in (self.student, self.other_student):
+            Follow.objects.create(investor=self.investor, student=student)
+        other_follow = Follow.objects.create(investor=self.other_investor, student=self.student)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.investor)
+        list_url = reverse("accounts:following")
+        client.get(list_url)
+        token = client.cookies["csrftoken"].value
+
+        response = client.post(
+            reverse("accounts:unfollow_student", args=[self.student.pk]),
+            {"source": "following", "csrfmiddlewaretoken": token},
+            follow=True,
+        )
+        self.assertRedirects(response, list_url)
+        self.assertEqual([follow.student for follow in response.context["follows"]], [self.other_student])
+        self.assertNotContains(response, reverse("accounts:investor_profile", args=[self.student.pk]))
+        self.assertTrue(Follow.objects.filter(pk=other_follow.pk).exists())
+
+        empty = client.post(
+            reverse("accounts:unfollow_student", args=[self.other_student.pk]),
+            {"source": "following", "csrfmiddlewaretoken": token},
+            follow=True,
+        )
+        self.assertRedirects(empty, list_url)
+        self.assertContains(empty, "You're not following any students yet.")
+        self.assertEqual(list(Follow.objects.all()), [other_follow])
+
+    def test_following_and_profile_visits_work_together(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"title": "Campus energy dashboard"}],
+        )
+        self.client.force_login(self.investor)
+        profile_url = reverse("accounts:investor_profile", args=[self.student.pk])
+        follow_url = reverse("accounts:follow_student", args=[self.student.pk])
+        unfollow_url = reverse("accounts:unfollow_student", args=[self.student.pk])
+
+        profile = self.client.get(profile_url)
+        self.assertContains(profile, "Campus energy dashboard")
+        self.assertContains(profile, f'action="{follow_url}"')
+
+        self.assertRedirects(
+            self.client.post(follow_url), profile_url, fetch_redirect_response=False
+        )
+        self.assertContains(self.client.get(reverse("accounts:following")), profile_url)
+        self.assertEqual(self.student.profile_visits.count(), 1)
+
+        followed_profile = self.client.get(profile_url)
+        self.assertContains(followed_profile, f'action="{unfollow_url}"')
+        self.assertNotContains(followed_profile, "Profile visits")
+        self.assertEqual(self.student.profile_visits.count(), 2)
+        self.assertTrue(Follow.objects.filter(investor=self.investor, student=self.student).exists())
+
+        self.client.post(unfollow_url, {"source": "following"})
+        self.assertFalse(Follow.objects.filter(investor=self.investor, student=self.student).exists())
+        self.assertEqual(self.student.profile_visits.count(), 2)
+
+        self.client.force_login(self.student)
+        own_profile = self.client.get(reverse("accounts:my_profile"))
+        self.assertContains(own_profile, "Investors have visited your profile 2 times.")
+        self.assertContains(own_profile, "Campus energy dashboard")
+
+
+class ReadableProfileEntryTests(FollowingTestDataMixin, TestCase):
+    def test_project_and_experience_are_readable_for_owner_and_investor(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"title": "Campus energy dashboard", "description": "Measure campus energy use."}],
+            experience=[{"role": "Student researcher", "company": "UPM", "period": "2025–2026"}],
+        )
+        for user, url in (
+            (self.student, reverse("accounts:my_profile")),
+            (self.investor, reverse("accounts:investor_profile", args=[self.student.pk])),
+        ):
+            with self.subTest(user=user.pk):
+                self.client.force_login(user)
+                response = self.client.get(url)
+                for content in ("Campus energy dashboard", "Measure campus energy use.", "Student researcher", "UPM", "2025–2026"):
+                    self.assertContains(response, content)
+                self.assertNotContains(response, "<pre")
+                self.assertNotContains(response, '&quot;title&quot;')
+                self.assertNotContains(response, '&quot;role&quot;')
+
+    def test_legacy_aliases_metadata_and_mixed_entries_remain_visible(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"name": "Legacy prototype", "tech_stack": ["Python", "Django"]}, "Community project", 3, None],
+            experience=[{"position": "Volunteer", "details": {"team": "Campus team"}}, True],
+        )
+        self.client.force_login(self.investor)
+        response = self.client.get(reverse("accounts:investor_profile", args=[self.student.pk]))
+        for content in ("Legacy prototype", "Tech stack", "Python", "Django", "Community project", "Not specified", "Volunteer", "Campus team", "Yes"):
+            self.assertContains(response, content)
+        self.assertNotContains(response, "<pre")
+
+    def test_untrusted_content_is_escaped_and_only_web_urls_are_links(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[
+                {"title": "<script>alert(1)</script>", "url": "javascript:alert(1)"},
+                {"title": "Safe project", "url": "https://example.com/project"},
+            ],
+            experience=[{"role": "<img src=x onerror=alert(1)>"}],
+        )
+        self.client.force_login(self.investor)
+        response = self.client.get(reverse("accounts:investor_profile", args=[self.student.pk]))
+        self.assertContains(response, '&lt;script&gt;')
+        self.assertNotContains(response, '<script>alert(1)')
+        self.assertNotContains(response, '<img src=x')
+        self.assertNotContains(response, 'href="javascript:')
+        self.assertContains(response, 'href="https://example.com/project"')
+
+
+class ProfileEntryEditorTests(FollowingTestDataMixin, TestCase):
+    def setUp(self):
+        self.url = reverse("accounts:student_profile")
+        self.client.force_login(self.student)
+
+    def editor_data(self):
+        response = self.client.get(self.url)
+        data = {"profile_entries_editor": "1", "bio": response.context["form"]["bio"].value() or ""}
+        skills = response.context["form"]["skills"].value()
+        data["skills"] = skills or []
+        for key in ("projects_formset", "experience_formset"):
+            formset = response.context[key]
+            for field in formset.management_form:
+                data[field.html_name] = field.value()
+            for form in formset:
+                for field in form:
+                    if field.name != "DELETE":
+                        data[field.html_name] = field.value() or ""
+        return data
+
+    def test_create_projects_and_experience_using_ordinary_fields(self):
+        data = self.editor_data()
+        data.update({
+            "bio": "A readable profile",
+            "projects-0-heading": "Campus energy dashboard",
+            "projects-0-description": "A useful dashboard.",
+            "projects-0-url": "https://example.com/dashboard",
+            "experience-0-heading": "Student researcher",
+            "experience-0-organization": "UPM",
+            "experience-0-period": "2025–2026",
+            "experience-0-description": "Built research prototypes.",
+        })
+
+        response = self.client.post(self.url, data)
+
+        self.assertRedirects(response, self.url)
+        profile = StudentProfile.objects.get(user=self.student)
+        self.assertEqual(profile.portfolio_projects, [{"title": "Campus energy dashboard", "description": "A useful dashboard.", "url": "https://example.com/dashboard"}])
+        self.assertEqual(profile.experience, [{"role": "Student researcher", "organization": "UPM", "period": "2025–2026", "description": "Built research prototypes."}])
+
+    def test_edited_fields_preserve_aliases_and_additional_metadata(self):
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"name": "Old project", "metadata": {"tags": ["campus"]}}],
+            experience=[{"position": "Researcher", "company": "Old lab", "year": 2024, "extra": [1, 2]}],
+        )
+        data = self.editor_data()
+        data.update({"projects-0-heading": "Updated project", "experience-0-organization": "New lab"})
+
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+
+        profile.refresh_from_db()
+        self.assertEqual(profile.portfolio_projects, [{"name": "Updated project", "metadata": {"tags": ["campus"]}}])
+        self.assertEqual(profile.experience, [{"position": "Researcher", "company": "New lab", "year": 2024, "extra": [1, 2]}])
+
+    def test_untouched_mixed_legacy_values_are_preserved_exactly(self):
+        projects = [{"title": "Legacy", "custom": {"values": [True, None]}}, {"title": "Old link", "url": "javascript:example"}, "Plain project", 3, True, None, ["Nested", 2]]
+        experience = [{"position": "Volunteer", "link": "javascript:example"}, "Plain role", False, {"custom": ["Other"]}]
+        profile = StudentProfile.objects.create(user=self.student, portfolio_projects=projects, experience=experience)
+        data = self.editor_data()
+        data["bio"] = "Only the bio changes."
+
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+
+        profile.refresh_from_db()
+        self.assertEqual(profile.portfolio_projects, projects)
+        self.assertEqual(profile.experience, experience)
+
+    def test_explicit_removal_preserves_the_other_entries(self):
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"title": "Remove me"}, {"title": "Keep me", "extra": [3]}],
+            experience=[{"role": "Keep this role"}],
+        )
+        data = self.editor_data()
+        data["projects-0-DELETE"] = "on"
+
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+
+        profile.refresh_from_db()
+        self.assertEqual(profile.portfolio_projects, [{"title": "Keep me", "extra": [3]}])
+        self.assertEqual(profile.experience, [{"role": "Keep this role"}])
+
+    def test_invalid_entry_shows_errors_and_values_without_partial_save(self):
+        profile = StudentProfile.objects.create(user=self.student, bio="Keep bio", portfolio_projects=[{"title": "Keep project"}])
+        data = self.editor_data()
+        data.update({"bio": "Do not save", "projects-0-heading": "", "projects-0-description": "Keep my typed description", "experience-0-heading": "Do not save this role"})
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter a project title or remove this entry.")
+        self.assertContains(response, "Keep my typed description")
+        self.assertContains(response, "Do not save this role")
+        profile.refresh_from_db()
+        self.assertEqual(profile.bio, "Keep bio")
+        self.assertEqual(profile.portfolio_projects, [{"title": "Keep project"}])
+        self.assertEqual(profile.experience, [])
+
+    def test_new_project_rejects_unsafe_links(self):
+        data = self.editor_data()
+        data.update({"projects-0-heading": "Project", "projects-0-url": "javascript:alert(1)"})
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter a full link starting with https:// or http://.")
+        self.assertFalse(StudentProfile.objects.exists())
+
+    def test_missing_or_shortened_management_data_cannot_erase_saved_entries(self):
+        profile = StudentProfile.objects.create(user=self.student, portfolio_projects=[{"title": "Keep project"}])
+        for field, value in (("projects-TOTAL_FORMS", "0"), ("projects-INITIAL_FORMS", "0"), ("projects-TOTAL_FORMS", None)):
+            with self.subTest(field=field, value=value):
+                data = self.editor_data()
+                if value is None:
+                    data.pop(field)
+                else:
+                    data[field] = value
+                response = self.client.post(self.url, data)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Reload the page and try again.")
+                profile.refresh_from_db()
+                self.assertEqual(profile.portfolio_projects, [{"title": "Keep project"}])
+
+    def test_empty_extra_entries_are_optional_and_do_not_create_empty_objects(self):
+        data = self.editor_data()
+        data["bio"] = "My bio"
+
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+
+        profile = StudentProfile.objects.get(user=self.student)
+        self.assertEqual(profile.portfolio_projects, [])
+        self.assertEqual(profile.experience, [])
+
+    def test_new_editor_keeps_existing_ownership_and_role_restrictions(self):
+        other_profile = StudentProfile.objects.create(user=self.other_student, bio="Other student")
+        data = self.editor_data()
+        data.update({"user": self.other_student.pk, "profile": other_profile.pk, "projects-0-heading": "My project"})
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+        other_profile.refresh_from_db()
+        self.assertEqual(other_profile.bio, "Other student")
+        self.assertEqual(other_profile.portfolio_projects, [])
+        self.assertEqual(StudentProfile.objects.get(user=self.student).portfolio_projects, [{"title": "My project"}])
+        self.client.force_login(self.investor)
+        self.assertEqual(self.client.post(self.url, data).status_code, 403)
 
 
 class ProfileVisitStatisticsTests(TestCase):

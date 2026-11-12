@@ -1,9 +1,13 @@
+from copy import deepcopy
+
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
+from django.core.validators import URLValidator
 from django.utils.translation import gettext_lazy as _
 
 from .models import Skill, StudentProfile, User
+from .profile_entries import ENTRY_FIELDS, entry_fields, present_entry
 
 
 class BootstrapFormMixin:
@@ -131,3 +135,106 @@ class StudentProfileForm(BootstrapFormMixin, forms.ModelForm):
             error_dict[NON_FIELD_ERRORS] = error_dict.pop("user")
             errors = ValidationError(error_dict)
         super()._update_errors(errors)
+
+
+class ProfileEntryForm(BootstrapFormMixin, forms.Form):
+    heading = forms.CharField(required=False)
+    organization = forms.CharField(required=False, label=_("Organization"))
+    period = forms.CharField(required=False, label=_("Period"))
+    description = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    url = forms.CharField(required=False, label=_("Project link"), widget=forms.URLInput)
+
+    def __init__(self, *args, kind, original=None, is_existing=False, **kwargs):
+        self.kind = kind
+        self.original = original
+        self.is_existing = is_existing
+        self.read_only_entry = is_existing and not isinstance(original, (dict, str))
+        initial, self.entry_keys = entry_fields(original, kind)
+        kwargs.setdefault("initial", initial)
+        super().__init__(*args, **kwargs)
+        self.preview = present_entry(original, kind) if is_existing else None
+        for field_name in list(self.fields):
+            if self.read_only_entry or field_name not in ENTRY_FIELDS[kind]:
+                del self.fields[field_name]
+        if not self.read_only_entry:
+            self.fields["heading"].label = _("Project title") if kind == "project" else _("Role")
+        if "url" in self.fields:
+            self.fields["url"].help_text = _("A full link starting with https:// or http://.")
+        if "period" in self.fields:
+            self.fields["period"].widget.attrs["placeholder"] = _("For example, 2025–2026")
+
+    def clean_url(self):
+        value = self.cleaned_data["url"]
+        if value and (not self.is_existing or value != self.initial.get("url", "")):
+            try:
+                URLValidator(schemes=["http", "https"])(value)
+            except ValidationError:
+                raise ValidationError(_("Enter a full link starting with https:// or http://."))
+        return value
+
+    def clean(self):
+        data = super().clean()
+        if not self.read_only_entry and self.has_changed() and not data.get("heading"):
+            message = _("Enter a project title or remove this entry.") if self.kind == "project" else _("Enter a role or remove this entry.")
+            self.add_error("heading", message)
+        return data
+
+    def to_entry(self):
+        if self.read_only_entry or (self.is_existing and not self.has_changed()):
+            return deepcopy(self.original)
+        if isinstance(self.original, str) and not any(
+            self.cleaned_data.get(field) for field in ENTRY_FIELDS[self.kind] if field != "heading"
+        ):
+            return self.cleaned_data["heading"]
+        entry = deepcopy(self.original) if isinstance(self.original, dict) else {}
+        for field, key in self.entry_keys.items():
+            value = self.cleaned_data.get(field, "")
+            if not self.is_existing or value != self.initial.get(field, ""):
+                if value:
+                    entry[key] = value
+                else:
+                    entry.pop(key, None)
+        return entry
+
+
+class BaseProfileEntryFormSet(forms.BaseFormSet):
+    default_error_messages = {
+        **forms.BaseFormSet.default_error_messages,
+        "missing_management_form": _("These entries could not be read. Reload the page and try again."),
+    }
+
+    def __init__(self, *args, entries, kind, **kwargs):
+        self.entries = entries if isinstance(entries, list) else []
+        self.kind = kind
+        kwargs["initial"] = [entry_fields(entry, kind)[0] for entry in self.entries]
+        super().__init__(*args, **kwargs)
+
+    def get_form_kwargs(self, index):
+        kwargs = super().get_form_kwargs(index)
+        is_existing = index is not None and index < len(self.entries)
+        kwargs.update(kind=self.kind, is_existing=is_existing, original=self.entries[index] if is_existing else None)
+        return kwargs
+
+    def add_fields(self, form, index):
+        super().add_fields(form, index)
+        form.fields["DELETE"].label = _("Remove this entry when saving")
+        form.fields["DELETE"].widget.attrs["class"] = "form-check-input"
+
+    def clean(self):
+        super().clean()
+        if self.management_form.is_valid() and (
+            self.initial_form_count() != len(self.entries) or self.total_form_count() < len(self.entries)
+        ):
+            raise ValidationError(_("These entries have changed or could not be read. Reload the page and try again."))
+
+    def to_entries(self):
+        return [
+            form.to_entry()
+            for form in self.forms
+            if not self._should_delete_form(form) and (form.is_existing or form.has_changed())
+        ]
+
+
+ProfileEntryFormSet = forms.formset_factory(
+    ProfileEntryForm, formset=BaseProfileEntryFormSet, extra=1, can_delete=True
+)

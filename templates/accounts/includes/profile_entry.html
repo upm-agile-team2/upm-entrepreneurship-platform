@@ -1,0 +1,15 @@
+{% load i18n %}
+<div class="profile-entry">
+  <h3 class="profile-entry-title">{{ entry.heading }}</h3>
+  {% if entry.subtitle %}<p class="profile-entry-subtitle">{{ entry.subtitle }}</p>{% endif %}
+  {% if entry.description %}<p class="profile-entry-description">{{ entry.description|linebreaksbr }}</p>{% endif %}
+  {% if entry.details %}
+    <dl class="profile-entry-details">
+      {% for detail in entry.details %}
+        <dt>{{ detail.label }}</dt>
+        <dd>{{ detail.value|linebreaksbr }}</dd>
+      {% endfor %}
+    </dl>
+  {% endif %}
+  {% if entry.url %}<a class="back-link" href="{{ entry.url }}">{% translate "View project" %} <span aria-hidden="true">↗</span></a>{% endif %}
+</div>
