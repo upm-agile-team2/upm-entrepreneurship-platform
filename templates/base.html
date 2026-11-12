@@ -39,6 +39,10 @@
                 <li class="nav-item">
                   <a class="nav-link" href="{% url 'accounts:my_profile' %}">{% translate "My profile" %}</a>
                 </li>
+              {% elif user.is_investor %}
+                <li class="nav-item">
+                  <a class="nav-link" href="{% url 'accounts:following' %}"{% if request.resolver_match.view_name == 'accounts:following' %} aria-current="page"{% endif %}>{% translate "Following" %}</a>
+                </li>
               {% endif %}
               <li class="nav-item">
                 <span class="account-name">

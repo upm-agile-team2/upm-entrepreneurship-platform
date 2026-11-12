@@ -120,6 +120,18 @@ textarea.form-control { resize: vertical; min-height: 170px; line-height: 1.7; }
 .detail-description p { margin: 0; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; padding-top: 28px; border-top: 1px solid var(--app-border); }
 
+.profile-heading { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.profile-follow-action { flex: 0 0 auto; margin: 0; }
+.profile-card { border-color: var(--app-border); border-radius: var(--app-radius); background: var(--surface-card); }
+.profile-card .card-body { display: flex; flex-direction: column; padding: 24px; min-width: 0; }
+.profile-card-title { font-size: 1.125rem; line-height: 1.4; margin-bottom: 12px; overflow-wrap: anywhere; }
+.profile-card-title a { color: var(--app-ink); text-decoration: none; }
+.profile-card-title a:hover { color: var(--app-blue); text-decoration: underline; }
+.profile-card-bio { color: var(--app-muted); line-height: 1.6; margin-bottom: 16px; overflow-wrap: anywhere; }
+.profile-card-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto; padding-top: 24px; }
+.profile-card-actions > a, .profile-card-actions > form { flex: 1 1 130px; margin-bottom: 0; }
+.profile-card-actions form .btn { width: 100%; }
+
 @media (max-width: 767.98px) {
   .navbar { min-height: 64px; padding-block: 12px; }
   .brand-logo { width: 32px; height: 34px; }

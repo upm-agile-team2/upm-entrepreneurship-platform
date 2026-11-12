@@ -109,6 +109,9 @@ def investor_profile(request, student_id):
     )
     context = _profile_display_context(student)
     context["is_own_profile"] = False
+    context["is_following"] = Follow.objects.filter(
+        investor=request.user, student=student
+    ).exists()
     return render(request, "accounts/student_profile_detail.html", context)
 
 @login_required(login_url=reverse_lazy("accounts:login"))
@@ -134,4 +137,20 @@ def unfollow_student(request, student_id):
     deleted, details = Follow.objects.filter(investor=request.user, student=student).delete()
     if deleted:
         messages.success(request, _("You have unfollowed %(name)s.") % {"name": student.name})
+    if request.POST.get("source") == "following":
+        return redirect("accounts:following")
     return redirect("accounts:investor_profile", student_id=student.pk)
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+@require_GET
+def following(request):
+    if not request.user.is_investor:
+        raise PermissionDenied
+
+    follows = (
+        Follow.objects.filter(investor=request.user, student__role=User.Role.STUDENT)
+        .select_related("student", "student__student_profile")
+        .prefetch_related("student__student_profile__skills")
+    )
+    return render(request, "accounts/following.html", {"follows": follows})

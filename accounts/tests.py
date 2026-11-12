@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from ideas.models import Idea
 
@@ -1018,3 +1019,197 @@ class FollowActionTests(FollowingTestDataMixin, TestCase):
             with self.subTest(url=url):
                 response = self.client.post(url, {"next": "https://example.com/", "source": "//example.com/"})
                 self.assertRedirects(response, self.profile_url)
+
+
+class FollowProfilePresentationTests(FollowingTestDataMixin, TestCase):
+    def setUp(self):
+        self.profile_url = reverse("accounts:investor_profile", args=[self.student.pk])
+        self.follow_url = reverse("accounts:follow_student", args=[self.student.pk])
+        self.unfollow_url = reverse("accounts:unfollow_student", args=[self.student.pk])
+
+    def test_incomplete_profile_offers_follow_without_creating_data(self):
+        self.client.force_login(self.investor)
+        response = self.client.get(self.profile_url)
+
+        self.assertContains(response, f'action="{self.follow_url}"')
+        self.assertContains(response, "csrfmiddlewaretoken")
+        self.assertNotContains(response, f'action="{self.unfollow_url}"')
+        self.assertContains(response, "This student has not added profile information yet.")
+        self.assertFalse(Follow.objects.exists())
+        self.assertFalse(StudentProfile.objects.exists())
+
+    def test_follow_control_reflects_only_the_current_investors_state(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+        self.client.force_login(self.investor)
+        response = self.client.get(self.profile_url)
+        self.assertContains(response, f'action="{self.unfollow_url}"')
+        self.assertNotContains(response, f'action="{self.follow_url}"')
+
+        self.client.force_login(self.other_investor)
+        other_response = self.client.get(self.profile_url)
+        self.assertContains(other_response, f'action="{self.follow_url}"')
+        self.assertNotContains(other_response, f'action="{self.unfollow_url}"')
+
+    def test_students_own_profiles_have_no_follow_controls(self):
+        self.client.force_login(self.student)
+        response = self.client.get(reverse("accounts:my_profile"))
+        self.assertNotContains(response, self.follow_url)
+        self.assertNotContains(response, self.unfollow_url)
+
+    def test_profile_forms_support_follow_and_unfollow_with_csrf_enforced(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.investor)
+        client.get(self.profile_url)
+        token = client.cookies["csrftoken"].value
+
+        followed = client.post(self.follow_url, {"csrfmiddlewaretoken": token})
+        self.assertRedirects(followed, self.profile_url)
+        self.assertTrue(Follow.objects.filter(investor=self.investor, student=self.student).exists())
+
+        unfollowed = client.post(self.unfollow_url, {"csrfmiddlewaretoken": token})
+        self.assertRedirects(unfollowed, self.profile_url)
+        self.assertFalse(Follow.objects.exists())
+
+
+class FollowingListTests(FollowingTestDataMixin, TestCase):
+    def setUp(self):
+        self.list_url = reverse("accounts:following")
+
+    def test_list_shows_only_current_investors_followed_students_and_profile_links(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+        Follow.objects.create(investor=self.other_investor, student=self.other_student)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertContains(response, self.student.name)
+        self.assertNotContains(response, self.other_student.name)
+        self.assertContains(response, reverse("accounts:investor_profile", args=[self.student.pk]))
+        self.assertNotContains(response, self.student.email)
+
+    def test_list_displays_available_bio_and_skills_and_escapes_profile_content(self):
+        profile = StudentProfile.objects.create(user=self.student, bio="<script>unsafe()</script> Robotics researcher.")
+        profile.skills.add(Skill.objects.create(name="Robotics"))
+        Follow.objects.create(investor=self.investor, student=self.student)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertContains(response, "Robotics researcher.")
+        self.assertContains(response, "Robotics")
+        self.assertContains(response, "&lt;script&gt;")
+        self.assertNotContains(response, "<script>unsafe()")
+
+    def test_list_handles_missing_and_empty_profiles(self):
+        StudentProfile.objects.create(user=self.other_student)
+        for student in (self.student, self.other_student):
+            Follow.objects.create(investor=self.investor, student=student)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertContains(response, "This student is still building their profile.", count=2)
+        self.assertContains(response, self.student.name)
+        self.assertContains(response, self.other_student.name)
+
+    def test_empty_list_explains_how_to_follow_and_links_to_ideas(self):
+        self.client.force_login(self.investor)
+        response = self.client.get(self.list_url)
+        self.assertContains(response, "You're not following any students yet.")
+        self.assertContains(response, 'href="' + reverse("ideas:home") + '"')
+        self.assertFalse(Follow.objects.exists())
+
+    def test_list_order_is_latest_follow_first_with_stable_ties(self):
+        first = Follow.objects.create(investor=self.investor, student=self.student)
+        second = Follow.objects.create(investor=self.investor, student=self.other_student)
+        Follow.objects.update(created_at=timezone.now())
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(list(response.context["follows"]), [second, first])
+
+    def test_following_page_requires_an_investor_session_and_get(self):
+        self.assertRedirects(
+            self.client.get(self.list_url), f"{reverse('accounts:login')}?next={self.list_url}"
+        )
+        self.client.force_login(self.student)
+        self.assertEqual(self.client.get(self.list_url).status_code, 403)
+        self.client.force_login(self.investor)
+        self.assertEqual(self.client.post(self.list_url).status_code, 405)
+
+    def test_following_navigation_is_investor_only(self):
+        home_url = reverse("ideas:home")
+        self.assertNotContains(self.client.get(home_url), self.list_url)
+        self.client.force_login(self.student)
+        self.assertNotContains(self.client.get(home_url), self.list_url)
+        self.client.force_login(self.investor)
+        self.assertContains(self.client.get(home_url), self.list_url)
+
+    def test_accounts_that_are_no_longer_students_are_not_listed(self):
+        Follow.objects.create(investor=self.investor, student=self.student)
+        self.student.role = User.Role.INVESTOR
+        self.student.save(update_fields=["role"])
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.list_url)
+
+        self.assertContains(response, "You're not following any students yet.")
+        self.assertNotContains(response, reverse("accounts:investor_profile", args=[self.student.pk]))
+
+
+class FollowingAcceptanceTests(FollowingTestDataMixin, TestCase):
+    def test_investor_follows_lists_and_unfollows_from_student_profile(self):
+        idea = Idea.objects.create(owner=self.student, title="A student project", description="A project to explore.")
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.investor)
+        profile_url = reverse("accounts:investor_profile", args=[self.student.pk])
+        follow_url = reverse("accounts:follow_student", args=[self.student.pk])
+        unfollow_url = reverse("accounts:unfollow_student", args=[self.student.pk])
+        list_url = reverse("accounts:following")
+
+        detail = client.get(reverse("ideas:detail", args=[idea.pk]))
+        self.assertContains(detail, profile_url)
+        profile = client.get(profile_url)
+        self.assertContains(profile, f'action="{follow_url}"')
+        token = client.cookies["csrftoken"].value
+
+        followed = client.post(follow_url, {"csrfmiddlewaretoken": token}, follow=True)
+        self.assertContains(followed, f'action="{unfollow_url}"')
+        listed = client.get(list_url)
+        self.assertContains(listed, self.student.name)
+        self.assertContains(listed, profile_url)
+
+        unfollowed = client.post(unfollow_url, {"csrfmiddlewaretoken": token}, follow=True)
+        self.assertContains(unfollowed, f'action="{follow_url}"')
+        self.assertContains(client.get(list_url), "You're not following any students yet.")
+        self.assertFalse(Follow.objects.exists())
+
+    def test_unfollow_from_list_updates_collection_and_preserves_other_investors(self):
+        for student in (self.student, self.other_student):
+            Follow.objects.create(investor=self.investor, student=student)
+        other_follow = Follow.objects.create(investor=self.other_investor, student=self.student)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.investor)
+        list_url = reverse("accounts:following")
+        client.get(list_url)
+        token = client.cookies["csrftoken"].value
+
+        response = client.post(
+            reverse("accounts:unfollow_student", args=[self.student.pk]),
+            {"source": "following", "csrfmiddlewaretoken": token},
+            follow=True,
+        )
+        self.assertRedirects(response, list_url)
+        self.assertEqual([follow.student for follow in response.context["follows"]], [self.other_student])
+        self.assertNotContains(response, reverse("accounts:investor_profile", args=[self.student.pk]))
+        self.assertTrue(Follow.objects.filter(pk=other_follow.pk).exists())
+
+        empty = client.post(
+            reverse("accounts:unfollow_student", args=[self.other_student.pk]),
+            {"source": "following", "csrfmiddlewaretoken": token},
+            follow=True,
+        )
+        self.assertRedirects(empty, list_url)
+        self.assertContains(empty, "You're not following any students yet.")
+        self.assertEqual(list(Follow.objects.all()), [other_follow])

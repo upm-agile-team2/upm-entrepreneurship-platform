@@ -6,12 +6,19 @@
 {% block content %}
   <section aria-labelledby="profile-title">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-      <div>
+      <div class="profile-heading">
         <p class="eyebrow">{% translate "Student profile" %}</p>
         <h1 id="profile-title">{{ student.name }}</h1>
       </div>
       {% if is_own_profile %}
         <a class="btn btn-primary" href="{% url 'accounts:student_profile' %}">{% translate "Edit profile" %}</a>
+      {% elif user.is_investor %}
+        <form method="post" action="{% if is_following %}{% url 'accounts:unfollow_student' student.pk %}{% else %}{% url 'accounts:follow_student' student.pk %}{% endif %}" class="profile-follow-action">
+          {% csrf_token %}
+          <button type="submit" class="btn {% if is_following %}btn-outline-secondary{% else %}btn-primary{% endif %}">
+            {% if is_following %}{% translate "Unfollow" %}{% else %}{% translate "Follow" %}{% endif %}
+          </button>
+        </form>
       {% endif %}
     </div>
 
