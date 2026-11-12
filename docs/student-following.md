@@ -57,7 +57,7 @@ python manage.py test accounts.tests.FollowModelTests accounts.tests.FollowActio
 
 Verified locally on 12 November 2026:
 
-- Full Django suite: initially 163 tests passed, including 27 following tests; after the related profile-entry correction, the combined suite passes 175 tests (see docs/profile-entries.md).
+- Full Django suite: initially 163 tests passed, including 27 following tests; after the related profile-entry correction, 175 tests passed (see docs/profile-entries.md). Integration with the latest main now passes 196 tests, as detailed below.
 - `python manage.py check`: no issues.
 - `python manage.py makemigrations --check --dry-run`: no changes detected.
 - `python manage.py migrate --check`: no pending migrations after applying `accounts.0007_follow`.
@@ -66,6 +66,21 @@ Verified locally on 12 November 2026:
 - Local SQLite was backed up before migration and existing user/idea records were preserved. Review fixtures, databases and credentials are excluded from the implementation.
 - A separate preview database passed 35 browser assertions plus a check for JavaScript runtime errors. Checked login restrictions, following through an idea author's profile, profile/list unfollow actions, persisted button state, two-investor isolation, student restrictions, empty/incomplete states, keyboard skip/follow controls and visible focus, mobile navigation, long names/skills, widths 360/768/1024/1440, and a 200% zoom-equivalent viewport. Desktop and mobile captures were visually inspected. Browser fixtures and screenshots stay under ignored `.venv/follow-review/`.
 
-Global OpenSpec validation (`openspec validate --all --strict`) reports 14 passing items after the profile-entry correction and one pre-existing failure: `seed-demo-ideas` has no delta specs. The same failure was reproduced in a separate checkout without this change. Its tracked planning files were left unchanged.
+Global OpenSpec validation (`openspec validate --all --strict`) now reports 15 passing items and one pre-existing failure: `seed-demo-ideas` has no delta specs. The same failure was reproduced in a separate checkout without this change. Its tracked planning files were left unchanged.
+
+## Integration with main after PRs #85, #87 and #90
+
+Feedback, notifications and profile visit statistics are integrated with following and the readable profile editor. The investor profile records each visit and retains Follow/Unfollow controls; the owner's profile retains readable projects/experience and shows the visit count.
+
+Both `0007_follow` and `0007_profile_visit` remain unchanged. The empty `0008_merge_follow_profile_visit` migration depends on both and reconciles the migration graph without changing either table's schema or rewriting their data.
+
+Verified on 12 November 2026:
+
+- Full Django suite: 196 tests passed, including 28 following tests, nine profile-visit tests and 12 profile-entry regression tests.
+- `FollowingAcceptanceTests.test_following_and_profile_visits_work_together` covers visit recording alongside Follow/Unfollow controls, collection navigation, readable entries, private statistics and the owner's final count. Follow actions and collection navigation do not themselves add visits; opening the investor-facing profile does.
+- Upgrade from an existing local database with `0007_follow`: backed up SQLite, applied `0007_profile_visit` and the merge migration, and verified that every existing user, idea, profile and follow row was unchanged.
+- Upgrade from a main-only database with `0007_profile_visit`: an isolated in-memory database retained its users, profile content and existing visit after adding following and applying the merge migration. Both models could be used together, with no conflicting or pending migrations.
+- Fresh-database migration coverage is included in the full Django suite. System checks and migration consistency checks passed.
+- Strict validation passed for `follow-student-profiles`, `polish-profile-entries` and `profile-view-statistics`. The global validation result is recorded above.
 
 Peer review, confirmation against the team's agreed wireframes, integration into main and Product Owner acceptance at Sprint Review remain external follow-up steps. T46 (#78), T47 (#79), T48 (#80) and US011 (#49) are not closed by this local implementation.

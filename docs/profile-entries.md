@@ -41,3 +41,7 @@ Saved rows now show their project title or role. With JavaScript enabled, blank 
 Follow-up checks: 23 focused profile tests passed; JavaScript syntax, OpenSpec strict validation and diff checks passed. A live response from port 8000 was checked for labelled groups, unique IDs and refreshed asset URLs. No database entries were deduplicated or deleted.
 
 These adjustments are included in PR #91 after local review. Peer review and integration into main remain pending. There is no schema or data change, and local credentials and databases remain excluded.
+
+## Integration with profile visit statistics
+
+After integrating main through PR #90, the shared profile retains readable entries, the ordinary editor and Follow/Unfollow controls, alongside investor visit recording and owner-only statistics. The full combined suite passes 196 tests. The integration also includes the accounts merge migration needed by following and visits; the entry correction itself still needs no schema or data rewrite. Upgrade-path checks and current validation results are recorded in [student-following.md](student-following.md#integration-with-main-after-prs-85-87-and-90).

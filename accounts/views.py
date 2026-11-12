@@ -12,7 +12,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from .forms import EmailAuthenticationForm, ProfileEntryFormSet, SignUpForm, StudentProfileForm
-from .models import Follow, StudentProfile
+from .models import Follow, ProfileVisit, StudentProfile
 from .profile_entries import present_entries
 
 User = get_user_model()
@@ -107,6 +107,7 @@ def my_profile(request):
 
     context = _profile_display_context(request.user)
     context["is_own_profile"] = True
+    context["profile_visit_count"] = request.user.profile_visits.count()
     return render(request, "accounts/student_profile_detail.html", context)
 
 
@@ -120,6 +121,7 @@ def investor_profile(request, student_id):
         User.objects.filter(role=User.Role.STUDENT),
         pk=student_id,
     )
+    ProfileVisit.objects.create(student=student, visitor=request.user)
     context = _profile_display_context(student)
     context["is_own_profile"] = False
     context["is_following"] = Follow.objects.filter(

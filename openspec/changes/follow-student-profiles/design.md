@@ -39,6 +39,8 @@ Query Follow by the authenticated investor and student role, select the student 
 
 The additive migration creates only the Follow table and constraints. Back up local SQLite before applying it, preserve existing users/ideas, and run the standard Django checks and tests. Removing this feature would require reversing that migration, which discards follow relationships only; no automatic rollback is performed.
 
+PR #90 adds the independent `accounts.0007_profile_visit` migration from the same `0006_skill_studentprofile` base. Keep both existing migrations unchanged and add `0008_merge_follow_profile_visit`, depending on both, with no schema operations. Verify upgrades from a database that already has follows and from one that already has visits, as well as fresh-database tests. The shared profile view must retain visit recording, follow controls and readable entries.
+
 ## Delivery
 
 One branch and one PR for T35 (#67) and T36 (#68), with commits separated by task after local review. Reference US011 (#49); keep shared tests, experiments and deployment tasks open. Record acceptance coverage and remaining peer-review/Sprint Review conditions without claiming those external approvals are complete.

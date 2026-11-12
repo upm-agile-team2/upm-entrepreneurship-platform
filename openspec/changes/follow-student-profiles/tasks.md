@@ -15,6 +15,7 @@
 
 - [x] 3.1 Back up SQLite, apply the additive migration and verify existing data counts; manually check follow/unfollow, the list, empty/incomplete states and keyboard/mobile layouts in a separate preview database, recording results in docs/student-following.md.
 - [x] 3.2 Run Django system and migration checks, OpenSpec strict validation, git diff --check and the full python manage.py test suite; record results and check the Definition of Done, explicitly leaving peer review, agreed-wireframe confirmation and Product Owner acceptance pending.
+- [x] 3.3 Integrate main after PRs #85, #87 and #90: preserve following, profile editing and visit statistics; reconcile the two accounts migrations; verify both upgrade paths and the combined acceptance journey; prepare updated validation records for PR #91.
 
 ## Workflow follow-up
 

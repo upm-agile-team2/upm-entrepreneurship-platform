@@ -22,6 +22,21 @@
       {% endif %}
     </div>
 
+    {% if is_own_profile %}
+      <section class="card mb-4" aria-labelledby="profile-visits-title">
+        <div class="card-body">
+          <h2 id="profile-visits-title" class="h4">{% translate "Profile visits" %}</h2>
+          {% if profile_visit_count %}
+            <p class="mb-0">
+              {% blocktranslate count counter=profile_visit_count %}Investors have visited your profile {{ counter }} time.{% plural %}Investors have visited your profile {{ counter }} times.{% endblocktranslate %}
+            </p>
+          {% else %}
+            <p class="text-body-secondary mb-0">{% translate "No visits have been recorded yet." %}</p>
+          {% endif %}
+        </div>
+      </section>
+    {% endif %}
+
     {% if not profile %}
       <div class="alert alert-info" role="status">
         {% if is_own_profile %}
