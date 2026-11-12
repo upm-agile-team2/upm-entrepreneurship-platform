@@ -18,7 +18,7 @@ from .management.commands.seed_demo_ideas import (
     DEMO_STUDENTS,
     demo_email,
 )
-from .models import Category, Feedback, Idea, Reply
+from .models import Category, Feedback, Idea, Notification, Reply
 
 User = get_user_model()
 
@@ -1154,6 +1154,88 @@ class FeedbackFeatureTests(TestCase):
         feedback = Feedback.objects.get()
         self.assertEqual(feedback.author, self.investor)
         self.assertContains(self.client.get(self.detail_url), "Feedback Investor")
+        notification = Notification.objects.get()
+        self.assertEqual(notification.recipient, self.owner)
+        self.assertEqual(notification.feedback, feedback)
+        self.assertFalse(notification.is_read)
+
+    def test_invalid_feedback_does_not_create_notification(self):
+        self.client.force_login(self.investor)
+        self.client.post(
+            reverse("ideas:feedback", args=[self.idea.pk]),
+            {"text": "   "},
+        )
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_notifications_are_only_created_for_the_idea_owner(self):
+        other_owner = create_student("other-feedback-owner@example.com")
+        other_idea = Idea.objects.create(
+            title="Other feedback idea",
+            description="Another idea.",
+            owner=other_owner,
+        )
+        self.client.force_login(self.investor)
+        self.client.post(
+            reverse("ideas:feedback", args=[other_idea.pk]),
+            {"text": "A suggestion for this idea."},
+        )
+
+        self.assertFalse(Notification.objects.filter(recipient=self.owner).exists())
+        notification = Notification.objects.get()
+        self.assertEqual(notification.recipient, other_owner)
+        self.assertFalse(Notification.objects.filter(recipient=self.investor).exists())
+
+    def test_owner_can_open_notification_and_mark_it_read(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A useful suggestion.",
+        )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+
+        self.assertRedirects(
+            response,
+            f"{self.detail_url}#feedback-{feedback.pk}",
+        )
+        notification.refresh_from_db()
+        self.assertTrue(notification.is_read)
+
+    def test_user_cannot_open_another_users_notification(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A useful suggestion.",
+        )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
+        self.client.force_login(self.other_investor)
+
+        response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+
+        self.assertEqual(response.status_code, 404)
+        notification.refresh_from_db()
+        self.assertFalse(notification.is_read)
+
+    def test_notifications_page_requires_authentication(self):
+        response = self.client.get(reverse("ideas:notifications"))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('accounts:login')}?next={reverse('ideas:notifications')}",
+        )
 
     def test_empty_feedback_is_rejected(self):
         self.client.force_login(self.investor)

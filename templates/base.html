@@ -46,6 +46,16 @@
                 </span>
               </li>
               <li class="nav-item">
+                <a class="nav-link" href="{% url 'ideas:notifications' %}">
+                  {% translate "Notifications" %}
+                  {% if unread_notification_count %}
+                    <span class="badge text-bg-primary" aria-label="{% blocktranslate with count=unread_notification_count %}{{ count }} unread notifications{% endblocktranslate %}">
+                      {{ unread_notification_count }}
+                    </span>
+                  {% endif %}
+                </a>
+              </li>
+              <li class="nav-item">
                 <form method="post" action="{% url 'accounts:logout' %}">
                   {% csrf_token %}
                   <button type="submit" class="nav-link btn btn-link">{% translate "Log out" %}</button>

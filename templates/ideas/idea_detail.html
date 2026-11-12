@@ -67,7 +67,7 @@
     {% endif %}
 
     {% for feedback in feedback_items %}
-      <article class="feedback-item" aria-label="{% translate 'Feedback item' %}">
+      <article id="feedback-{{ feedback.pk }}" class="feedback-item" aria-label="{% translate 'Feedback item' %}">
         <div class="feedback-meta">
           <strong>{% if feedback.author %}{{ feedback.author.name }}{% else %}{% translate "Former user" %}{% endif %}</strong>
           <time datetime="{{ feedback.timestamp|date:'c' }}">{{ feedback.timestamp|date:"M j, Y" }}</time>

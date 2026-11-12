@@ -107,3 +107,26 @@ class Reply(models.Model):
 
     def __str__(self):
         return f"Reply to {self.feedback}"
+
+
+class Notification(models.Model):
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("recipient"),
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    feedback = models.ForeignKey(
+        Feedback,
+        verbose_name=_("feedback"),
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    created_at = models.DateTimeField(_("created at"), auto_now_add=True)
+    is_read = models.BooleanField(_("read"), default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Notification for {self.recipient} about {self.feedback}"

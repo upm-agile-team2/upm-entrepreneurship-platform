@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Category, Feedback, Idea, Reply
+from .models import Category, Feedback, Idea, Notification, Reply
 
 
 @admin.register(Category)
@@ -24,3 +24,10 @@ class FeedbackAdmin(admin.ModelAdmin):
 @admin.register(Reply)
 class ReplyAdmin(admin.ModelAdmin):
     list_display = ["feedback", "author", "timestamp"]
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ["recipient", "feedback", "is_read", "created_at"]
+    list_filter = ["is_read"]
+    search_fields = ["recipient__email", "feedback__idea__title"]

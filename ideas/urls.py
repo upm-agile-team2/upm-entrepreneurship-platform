@@ -16,4 +16,10 @@ urlpatterns = [
         name="feedback-status",
     ),
     path("ideas/<int:idea_id>/edit/", views.edit_idea, name="edit"),
+    path("notifications/", views.notifications, name="notifications"),
+    path(
+        "notifications/<int:notification_id>/",
+        views.open_notification,
+        name="open-notification",
+    ),
 ]

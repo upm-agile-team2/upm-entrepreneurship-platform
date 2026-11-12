@@ -3,11 +3,11 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q, Prefetch
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
 
 from .forms import FeedbackForm, IdeaForm, ReplyForm
-from .models import Category, Feedback, Idea, Reply
+from .models import Category, Feedback, Idea, Notification, Reply
 
 
 def home(request):
@@ -85,6 +85,11 @@ def submit_feedback(request, idea_id):
         feedback.idea = idea
         feedback.author = request.user
         feedback.save()
+        if idea.owner_id != request.user.pk:
+            Notification.objects.create(
+                recipient=idea.owner,
+                feedback=feedback,
+            )
         messages.success(request, _("Your feedback has been submitted."))
         return redirect("ideas:detail", idea_id=idea.pk)
     return _render_idea_detail_with_feedback_form(request, idea, form)
@@ -208,4 +213,32 @@ def edit_idea(request, idea_id):
         request,
         "ideas/idea_form.html",
         {"form": form, "heading": _("Edit idea"), "submit_label": _("Save changes")},
+    )
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+def notifications(request):
+    notification_items = Notification.objects.filter(
+        recipient=request.user
+    ).select_related("feedback__idea", "feedback__author")
+    return render(
+        request,
+        "ideas/notifications.html",
+        {"notification_items": notification_items},
+    )
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+def open_notification(request, notification_id):
+    notification = get_object_or_404(
+        Notification.objects.select_related("feedback__idea"),
+        pk=notification_id,
+        recipient=request.user,
+    )
+    if not notification.is_read:
+        notification.is_read = True
+        notification.save(update_fields=["is_read"])
+    return redirect(
+        f"{reverse('ideas:detail', args=[notification.feedback.idea_id])}"
+        f"#feedback-{notification.feedback_id}"
     )
