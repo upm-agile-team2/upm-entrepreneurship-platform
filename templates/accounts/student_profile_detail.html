@@ -34,7 +34,7 @@
     {% else %}
       <div class="row g-4">
         <div class="col-12">
-          <section class="card h-100" aria-labelledby="profile-bio-title">
+          <section class="card h-100 profile-section" aria-labelledby="profile-bio-title">
             <div class="card-body">
               <h2 id="profile-bio-title" class="h4">{% translate "About" %}</h2>
               {% if profile.bio %}<p class="mb-0">{{ profile.bio|linebreaksbr }}</p>{% else %}<p class="text-body-secondary mb-0">{% translate "No bio added yet." %}</p>{% endif %}
@@ -42,7 +42,7 @@
           </section>
         </div>
         <div class="col-12 col-lg-4">
-          <section class="card h-100" aria-labelledby="profile-skills-title">
+          <section class="card h-100 profile-section" aria-labelledby="profile-skills-title">
             <div class="card-body">
               <h2 id="profile-skills-title" class="h4">{% translate "Skills" %}</h2>
               {% if skills %}
@@ -56,12 +56,12 @@
           </section>
         </div>
         <div class="col-12 col-lg-4">
-          <section class="card h-100" aria-labelledby="profile-projects-title">
+          <section class="card h-100 profile-section" aria-labelledby="profile-projects-title">
             <div class="card-body">
               <h2 id="profile-projects-title" class="h4">{% translate "Portfolio projects" %}</h2>
               {% if portfolio_projects %}
-                <ul class="list-unstyled mb-0">
-                  {% for project in portfolio_projects %}<li class="mb-3"><pre class="mb-0 text-break">{{ project }}</pre></li>{% endfor %}
+                <ul class="list-unstyled profile-entries mb-0">
+                  {% for entry in portfolio_projects %}<li>{% include "accounts/includes/profile_entry.html" %}</li>{% endfor %}
                 </ul>
               {% else %}
                 <p class="text-body-secondary mb-0">{% translate "No projects added yet." %}</p>
@@ -70,12 +70,12 @@
           </section>
         </div>
         <div class="col-12 col-lg-4">
-          <section class="card h-100" aria-labelledby="profile-experience-title">
+          <section class="card h-100 profile-section" aria-labelledby="profile-experience-title">
             <div class="card-body">
               <h2 id="profile-experience-title" class="h4">{% translate "Experience" %}</h2>
               {% if experience_entries %}
-                <ul class="list-unstyled mb-0">
-                  {% for entry in experience_entries %}<li class="mb-3"><pre class="mb-0 text-break">{{ entry }}</pre></li>{% endfor %}
+                <ul class="list-unstyled profile-entries mb-0">
+                  {% for entry in experience_entries %}<li>{% include "accounts/includes/profile_entry.html" %}</li>{% endfor %}
                 </ul>
               {% else %}
                 <p class="text-body-secondary mb-0">{% translate "No experience added yet." %}</p>

@@ -769,7 +769,7 @@ class StudentProfilePresentationTests(TestCase):
         self.assertContains(response, "You have not added profile information yet.")
         self.assertContains(response, "Create your profile")
 
-    def test_editor_uses_shared_styled_form_and_explains_json_inputs(self):
+    def test_editor_uses_styled_project_and_experience_fields(self):
         self.client.force_login(self.student)
 
         response = self.client.get(self.edit_url)
@@ -777,7 +777,11 @@ class StudentProfilePresentationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'class="form-surface"')
         self.assertContains(response, 'for="id_bio"')
-        self.assertContains(response, "Items may be any JSON values")
+        self.assertContains(response, "Project title")
+        self.assertContains(response, "Role")
+        self.assertNotContains(response, "Enter a JSON array")
+        self.assertNotContains(response, 'name="portfolio_projects"')
+        self.assertNotContains(response, 'name="experience"')
         self.assertContains(response, "No skills are available to select yet.")
         self.assertContains(response, self.own_profile_url)
 
@@ -879,6 +883,7 @@ class StudentProfilePresentationTests(TestCase):
         missing_url = reverse("accounts:investor_profile", args=[999999])
         self.assertEqual(self.client.get(investor_url).status_code, 404)
         self.assertEqual(self.client.get(missing_url).status_code, 404)
+
 
 class FollowingTestDataMixin:
     @classmethod
@@ -1213,3 +1218,200 @@ class FollowingAcceptanceTests(FollowingTestDataMixin, TestCase):
         self.assertRedirects(empty, list_url)
         self.assertContains(empty, "You're not following any students yet.")
         self.assertEqual(list(Follow.objects.all()), [other_follow])
+
+
+class ReadableProfileEntryTests(FollowingTestDataMixin, TestCase):
+    def test_project_and_experience_are_readable_for_owner_and_investor(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"title": "Campus energy dashboard", "description": "Measure campus energy use."}],
+            experience=[{"role": "Student researcher", "company": "UPM", "period": "2025–2026"}],
+        )
+        for user, url in (
+            (self.student, reverse("accounts:my_profile")),
+            (self.investor, reverse("accounts:investor_profile", args=[self.student.pk])),
+        ):
+            with self.subTest(user=user.pk):
+                self.client.force_login(user)
+                response = self.client.get(url)
+                for content in ("Campus energy dashboard", "Measure campus energy use.", "Student researcher", "UPM", "2025–2026"):
+                    self.assertContains(response, content)
+                self.assertNotContains(response, "<pre")
+                self.assertNotContains(response, '&quot;title&quot;')
+                self.assertNotContains(response, '&quot;role&quot;')
+
+    def test_legacy_aliases_metadata_and_mixed_entries_remain_visible(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"name": "Legacy prototype", "tech_stack": ["Python", "Django"]}, "Community project", 3, None],
+            experience=[{"position": "Volunteer", "details": {"team": "Campus team"}}, True],
+        )
+        self.client.force_login(self.investor)
+        response = self.client.get(reverse("accounts:investor_profile", args=[self.student.pk]))
+        for content in ("Legacy prototype", "Tech stack", "Python", "Django", "Community project", "Not specified", "Volunteer", "Campus team", "Yes"):
+            self.assertContains(response, content)
+        self.assertNotContains(response, "<pre")
+
+    def test_untrusted_content_is_escaped_and_only_web_urls_are_links(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[
+                {"title": "<script>alert(1)</script>", "url": "javascript:alert(1)"},
+                {"title": "Safe project", "url": "https://example.com/project"},
+            ],
+            experience=[{"role": "<img src=x onerror=alert(1)>"}],
+        )
+        self.client.force_login(self.investor)
+        response = self.client.get(reverse("accounts:investor_profile", args=[self.student.pk]))
+        self.assertContains(response, '&lt;script&gt;')
+        self.assertNotContains(response, '<script>alert(1)')
+        self.assertNotContains(response, '<img src=x')
+        self.assertNotContains(response, 'href="javascript:')
+        self.assertContains(response, 'href="https://example.com/project"')
+
+
+class ProfileEntryEditorTests(FollowingTestDataMixin, TestCase):
+    def setUp(self):
+        self.url = reverse("accounts:student_profile")
+        self.client.force_login(self.student)
+
+    def editor_data(self):
+        response = self.client.get(self.url)
+        data = {"profile_entries_editor": "1", "bio": response.context["form"]["bio"].value() or ""}
+        skills = response.context["form"]["skills"].value()
+        data["skills"] = skills or []
+        for key in ("projects_formset", "experience_formset"):
+            formset = response.context[key]
+            for field in formset.management_form:
+                data[field.html_name] = field.value()
+            for form in formset:
+                for field in form:
+                    if field.name != "DELETE":
+                        data[field.html_name] = field.value() or ""
+        return data
+
+    def test_create_projects_and_experience_using_ordinary_fields(self):
+        data = self.editor_data()
+        data.update({
+            "bio": "A readable profile",
+            "projects-0-heading": "Campus energy dashboard",
+            "projects-0-description": "A useful dashboard.",
+            "projects-0-url": "https://example.com/dashboard",
+            "experience-0-heading": "Student researcher",
+            "experience-0-organization": "UPM",
+            "experience-0-period": "2025–2026",
+            "experience-0-description": "Built research prototypes.",
+        })
+
+        response = self.client.post(self.url, data)
+
+        self.assertRedirects(response, self.url)
+        profile = StudentProfile.objects.get(user=self.student)
+        self.assertEqual(profile.portfolio_projects, [{"title": "Campus energy dashboard", "description": "A useful dashboard.", "url": "https://example.com/dashboard"}])
+        self.assertEqual(profile.experience, [{"role": "Student researcher", "organization": "UPM", "period": "2025–2026", "description": "Built research prototypes."}])
+
+    def test_edited_fields_preserve_aliases_and_additional_metadata(self):
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"name": "Old project", "metadata": {"tags": ["campus"]}}],
+            experience=[{"position": "Researcher", "company": "Old lab", "year": 2024, "extra": [1, 2]}],
+        )
+        data = self.editor_data()
+        data.update({"projects-0-heading": "Updated project", "experience-0-organization": "New lab"})
+
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+
+        profile.refresh_from_db()
+        self.assertEqual(profile.portfolio_projects, [{"name": "Updated project", "metadata": {"tags": ["campus"]}}])
+        self.assertEqual(profile.experience, [{"position": "Researcher", "company": "New lab", "year": 2024, "extra": [1, 2]}])
+
+    def test_untouched_mixed_legacy_values_are_preserved_exactly(self):
+        projects = [{"title": "Legacy", "custom": {"values": [True, None]}}, {"title": "Old link", "url": "javascript:example"}, "Plain project", 3, True, None, ["Nested", 2]]
+        experience = [{"position": "Volunteer", "link": "javascript:example"}, "Plain role", False, {"custom": ["Other"]}]
+        profile = StudentProfile.objects.create(user=self.student, portfolio_projects=projects, experience=experience)
+        data = self.editor_data()
+        data["bio"] = "Only the bio changes."
+
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+
+        profile.refresh_from_db()
+        self.assertEqual(profile.portfolio_projects, projects)
+        self.assertEqual(profile.experience, experience)
+
+    def test_explicit_removal_preserves_the_other_entries(self):
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            portfolio_projects=[{"title": "Remove me"}, {"title": "Keep me", "extra": [3]}],
+            experience=[{"role": "Keep this role"}],
+        )
+        data = self.editor_data()
+        data["projects-0-DELETE"] = "on"
+
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+
+        profile.refresh_from_db()
+        self.assertEqual(profile.portfolio_projects, [{"title": "Keep me", "extra": [3]}])
+        self.assertEqual(profile.experience, [{"role": "Keep this role"}])
+
+    def test_invalid_entry_shows_errors_and_values_without_partial_save(self):
+        profile = StudentProfile.objects.create(user=self.student, bio="Keep bio", portfolio_projects=[{"title": "Keep project"}])
+        data = self.editor_data()
+        data.update({"bio": "Do not save", "projects-0-heading": "", "projects-0-description": "Keep my typed description", "experience-0-heading": "Do not save this role"})
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter a project title or remove this entry.")
+        self.assertContains(response, "Keep my typed description")
+        self.assertContains(response, "Do not save this role")
+        profile.refresh_from_db()
+        self.assertEqual(profile.bio, "Keep bio")
+        self.assertEqual(profile.portfolio_projects, [{"title": "Keep project"}])
+        self.assertEqual(profile.experience, [])
+
+    def test_new_project_rejects_unsafe_links(self):
+        data = self.editor_data()
+        data.update({"projects-0-heading": "Project", "projects-0-url": "javascript:alert(1)"})
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter a full link starting with https:// or http://.")
+        self.assertFalse(StudentProfile.objects.exists())
+
+    def test_missing_or_shortened_management_data_cannot_erase_saved_entries(self):
+        profile = StudentProfile.objects.create(user=self.student, portfolio_projects=[{"title": "Keep project"}])
+        for field, value in (("projects-TOTAL_FORMS", "0"), ("projects-INITIAL_FORMS", "0"), ("projects-TOTAL_FORMS", None)):
+            with self.subTest(field=field, value=value):
+                data = self.editor_data()
+                if value is None:
+                    data.pop(field)
+                else:
+                    data[field] = value
+                response = self.client.post(self.url, data)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Reload the page and try again.")
+                profile.refresh_from_db()
+                self.assertEqual(profile.portfolio_projects, [{"title": "Keep project"}])
+
+    def test_empty_extra_entries_are_optional_and_do_not_create_empty_objects(self):
+        data = self.editor_data()
+        data["bio"] = "My bio"
+
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+
+        profile = StudentProfile.objects.get(user=self.student)
+        self.assertEqual(profile.portfolio_projects, [])
+        self.assertEqual(profile.experience, [])
+
+    def test_new_editor_keeps_existing_ownership_and_role_restrictions(self):
+        other_profile = StudentProfile.objects.create(user=self.other_student, bio="Other student")
+        data = self.editor_data()
+        data.update({"user": self.other_student.pk, "profile": other_profile.pk, "projects-0-heading": "My project"})
+        self.assertRedirects(self.client.post(self.url, data), self.url)
+        other_profile.refresh_from_db()
+        self.assertEqual(other_profile.bio, "Other student")
+        self.assertEqual(other_profile.portfolio_projects, [])
+        self.assertEqual(StudentProfile.objects.get(user=self.student).portfolio_projects, [{"title": "My project"}])
+        self.client.force_login(self.investor)
+        self.assertEqual(self.client.post(self.url, data).status_code, 403)

@@ -1,0 +1,12 @@
+{% load i18n %}
+<fieldset class="profile-entry-collection" data-entry-collection data-prefix="{{ entry_formset.prefix }}">
+  <legend>{{ title }} <span class="field-optional">({% translate "optional" %})</span></legend>
+  {{ entry_formset.management_form }}
+  {% if entry_formset.non_form_errors %}<div class="form-errors" role="alert">{{ entry_formset.non_form_errors }}</div>{% endif %}
+  {% if field_errors %}<div class="form-errors" role="alert">{{ field_errors }}</div>{% endif %}
+  <div data-entry-forms>
+    {% for entry_form in entry_formset %}{% include "accounts/includes/profile_entry_form.html" %}{% endfor %}
+  </div>
+  <template data-entry-template>{% include "accounts/includes/profile_entry_form.html" with entry_form=entry_formset.empty_form %}</template>
+  <button type="button" class="btn btn-outline-secondary" data-add-entry hidden>{{ add_label }}</button>
+</fieldset>

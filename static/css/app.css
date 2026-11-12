@@ -131,6 +131,24 @@ textarea.form-control { resize: vertical; min-height: 170px; line-height: 1.7; }
 .profile-card-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto; padding-top: 24px; }
 .profile-card-actions > a, .profile-card-actions > form { flex: 1 1 130px; margin-bottom: 0; }
 .profile-card-actions form .btn { width: 100%; }
+.profile-section { border-color: var(--app-border); border-radius: var(--app-radius); background: var(--surface-card); }
+.profile-section .card-body { padding: 24px; min-width: 0; }
+.profile-section .h4 { font-size: 1.125rem; margin-bottom: 20px; }
+.profile-entries > li + li { border-top: 1px solid var(--app-border); padding-top: 20px; margin-top: 20px; }
+.profile-entry { min-width: 0; overflow-wrap: anywhere; }
+.profile-entry-title { font-size: 1rem; line-height: 1.5; margin-bottom: 8px; }
+.profile-entry-subtitle, .profile-entry-description { color: var(--app-muted); font-size: .9375rem; line-height: 1.65; margin-bottom: 12px; }
+.profile-entry-details { font-size: .875rem; margin: 12px 0; }
+.profile-entry-details dt { color: var(--app-ink); font-weight: 600; }
+.profile-entry-details dd { color: var(--app-muted); margin-bottom: 12px; }
+.profile-entry-collection { margin-bottom: 32px; min-width: 0; }
+.profile-entry-collection > legend { float: none; font-size: 1.125rem; font-weight: 700; margin-bottom: 16px; }
+.profile-entry-editor { min-width: 0; padding: 20px; margin-bottom: 16px; border: 1px solid var(--app-border); border-radius: var(--radius-control); }
+.profile-entry-editor > legend { float: none; width: auto; font-size: .875rem; font-weight: 600; padding-inline: 6px; margin-bottom: 8px; }
+.profile-entry-editor .form-field { margin-bottom: 16px; }
+.profile-entry-editor textarea { min-height: 96px; }
+.profile-entry-editor .form-check { font-size: .8125rem; color: var(--app-muted); }
+.profile-entry-extra { font-size: .875rem; margin-bottom: 16px; }
 
 @media (max-width: 767.98px) {
   .navbar { min-height: 64px; padding-block: 12px; }

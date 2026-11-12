@@ -5,13 +5,15 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, LogoutView
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
-from .forms import EmailAuthenticationForm, SignUpForm, StudentProfileForm
+from .forms import EmailAuthenticationForm, ProfileEntryFormSet, SignUpForm, StudentProfileForm
 from .models import Follow, StudentProfile
+from .profile_entries import present_entries
 
 User = get_user_model()
 
@@ -50,18 +52,34 @@ def student_profile(request):
     except StudentProfile.DoesNotExist:
         profile = StudentProfile(user=request.user)
 
-    form = StudentProfileForm(
-        request.POST if request.method == "POST" else None,
-        instance=profile,
+    editor_submission = request.method == "POST" and request.POST.get("profile_entries_editor") == "1"
+    projects = ProfileEntryFormSet(
+        request.POST if editor_submission else None,
+        entries=profile.portfolio_projects, kind="project", prefix="projects",
     )
-    if request.method == "POST" and form.is_valid():
-        form.save()
+    experience = ProfileEntryFormSet(
+        request.POST if editor_submission else None,
+        entries=profile.experience, kind="experience", prefix="experience",
+    )
+    data = request.POST if request.method == "POST" else None
+    entries_valid = True
+    if editor_submission:
+        entries_valid = all([projects.is_valid(), experience.is_valid()])
+        data = request.POST.copy()
+        data["portfolio_projects"] = json.dumps(projects.to_entries() if entries_valid else profile.portfolio_projects)
+        data["experience"] = json.dumps(experience.to_entries() if entries_valid else profile.experience)
+    form = StudentProfileForm(data, instance=profile)
+    if request.method == "POST" and form.is_valid() and entries_valid:
+        with transaction.atomic():
+            form.save()
+        messages.success(request, _("Your profile has been saved."))
         return redirect("accounts:student_profile")
 
     return render(
         request,
         "accounts/student_profile_form.html",
-        {"form": form, "profile": profile},
+        {"form": form, "profile": profile, "profile_fields": [form["bio"], form["skills"]],
+         "projects_formset": projects, "experience_formset": experience},
     )
 
 
@@ -72,17 +90,12 @@ def _profile_display_context(student):
         .first()
     )
 
-    def format_entries(values):
-        if not isinstance(values, list):
-            return []
-        return [json.dumps(value, ensure_ascii=False, indent=2) for value in values]
-
     return {
         "student": student,
         "profile": profile,
         "skills": profile.skills.all() if profile else [],
-        "portfolio_projects": format_entries(profile.portfolio_projects) if profile else [],
-        "experience_entries": format_entries(profile.experience) if profile else [],
+        "portfolio_projects": present_entries(profile.portfolio_projects, "project") if profile else [],
+        "experience_entries": present_entries(profile.experience, "experience") if profile else [],
     }
 
 
@@ -113,6 +126,7 @@ def investor_profile(request, student_id):
         investor=request.user, student=student
     ).exists()
     return render(request, "accounts/student_profile_detail.html", context)
+
 
 @login_required(login_url=reverse_lazy("accounts:login"))
 @require_POST
