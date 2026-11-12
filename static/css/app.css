@@ -141,11 +141,14 @@ textarea.form-control { resize: vertical; min-height: 170px; line-height: 1.7; }
 .profile-entry-details { font-size: .875rem; margin: 12px 0; }
 .profile-entry-details dt { color: var(--app-ink); font-weight: 600; }
 .profile-entry-details dd { color: var(--app-muted); margin-bottom: 12px; }
-.profile-entry-collection { margin-bottom: 32px; min-width: 0; }
-.profile-entry-collection > legend { float: none; font-size: 1.125rem; font-weight: 700; margin-bottom: 16px; }
-.profile-entry-editor { min-width: 0; padding: 20px; margin-bottom: 16px; border: 1px solid var(--app-border); border-radius: var(--radius-control); }
-.profile-entry-editor > legend { float: none; width: auto; font-size: .875rem; font-weight: 600; padding-inline: 6px; margin-bottom: 8px; }
-.profile-entry-editor .form-field { margin-bottom: 16px; }
+.profile-entry-collection { display: block; width: 100%; max-width: 100%; margin-bottom: 32px; min-width: 0; }
+.profile-entry-collection-title { font-size: 1.125rem; font-weight: 700; line-height: 1.5; margin-bottom: 16px; overflow-wrap: anywhere; }
+.profile-entry-collection [data-entry-forms] { display: block; min-width: 0; width: 100%; max-width: 100%; }
+.profile-entry-editor { display: block; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; padding: 20px; margin-bottom: 16px; border: 1px solid var(--app-border); border-radius: var(--radius-control); overflow-wrap: anywhere; }
+.profile-entry-editor[hidden] { display: none; }
+.profile-entry-editor-title { font-size: .9375rem; font-weight: 600; line-height: 1.5; margin-bottom: 16px; }
+.profile-entry-editor .form-field { min-width: 0; margin-bottom: 16px; }
+.profile-entry-editor .form-control { box-sizing: border-box; min-width: 0; width: 100%; max-width: 100%; }
 .profile-entry-editor textarea { min-height: 96px; }
 .profile-entry-editor .form-check { font-size: .8125rem; color: var(--app-muted); }
 .profile-entry-extra { font-size: .875rem; margin-bottom: 16px; }

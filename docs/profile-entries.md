@@ -4,7 +4,7 @@ The profile screen introduced in PR #86 displayed projects and experience as raw
 
 Projects and experience now use readable headings, descriptions and available supporting details. Known legacy aliases are understood, other metadata remains visible as labeled text, and only validated HTTP/HTTPS project links become clickable. All saved content remains escaped.
 
-Students edit entries through ordinary fields. Add project/Add experience provides additional rows; Remove this entry when saving is an explicit deletion control. One blank row per section also works without JavaScript. Invalid entries keep the entered values and show field errors without saving any part of the profile.
+Students edit entries through ordinary fields. Saved rows show the entry's title or role. Add project/Add experience reveals a spare blank row before creating more; unused blank rows are hidden when JavaScript is active so they are not mistaken for duplicates. Remove this entry when saving is an explicit deletion control. One blank row per section also works without JavaScript. Invalid entries keep the entered values and show field errors without saving any part of the profile.
 
 Storage remains in the existing JSON list fields. Untouched entries retain their exact values and types. Editing a supported field on a saved dictionary retains aliases and additional metadata. Historical non-text scalar/list entries remain readable and removable. The original complete-form JSON POST behavior, validation and owner restrictions remain supported. No migration or data rewrite is needed.
 
@@ -31,3 +31,13 @@ Regression coverage: `accounts.tests.ReadableProfileEntryTests` and `accounts.te
 6. Repeat at mobile widths and use the keyboard to add and navigate entry fields.
 
 Local review is complete. Peer review, integration into main, agreed-wireframe confirmation and Product Owner acceptance remain follow-up conditions. This correction does not close additional issues or archive OpenSpec changes automatically.
+
+## Embedded-editor layout
+
+The editor uses explicitly labelled block groups instead of nested native fieldset/legend wrappers. Collections and controls are bounded to the available width, and refreshed CSS/editor-script URLs prevent stale assets from retaining the previous layout. Local review in VS Code's embedded browser confirmed that the reported horizontal overflow is resolved.
+
+Saved rows now show their project title or role. With JavaScript enabled, blank optional rows stay hidden until Add is selected, and an unused row is reused before another is cloned. The server-rendered blank row remains available without JavaScript; rows containing errors or entered values are not hidden.
+
+Follow-up checks: 23 focused profile tests passed; JavaScript syntax, OpenSpec strict validation and diff checks passed. A live response from port 8000 was checked for labelled groups, unique IDs and refreshed asset URLs. No database entries were deduplicated or deleted.
+
+These adjustments are included in PR #91 after local review. Peer review and integration into main remain pending. There is no schema or data change, and local credentials and databases remain excluded.

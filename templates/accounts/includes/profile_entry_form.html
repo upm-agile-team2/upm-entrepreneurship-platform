@@ -1,6 +1,6 @@
 {% load i18n %}
-<fieldset class="profile-entry-editor" data-entry-form>
-  <legend>{% if entry_form.is_existing %}{% translate "Saved entry" %}{% else %}{% translate "New entry" %}{% endif %}</legend>
+<div class="profile-entry-editor" role="group" aria-labelledby="{{ entry_form.prefix }}-entry-heading" data-entry-form data-existing="{{ entry_form.is_existing|yesno:'true,false' }}" data-has-errors="{{ entry_form.errors|yesno:'true,false' }}">
+  <h3 id="{{ entry_form.prefix }}-entry-heading" class="profile-entry-editor-title">{% if entry_form.is_existing %}{{ entry_form.preview.heading }}{% elif entry_form.kind == 'project' %}{% translate "New project" %}{% else %}{% translate "New experience" %}{% endif %}</h3>
   {% if entry_form.non_field_errors %}<div class="form-errors" role="alert">{{ entry_form.non_field_errors }}</div>{% endif %}
   {% if entry_form.read_only_entry %}
     {% include "accounts/includes/profile_entry.html" with entry=entry_form.preview %}
@@ -26,4 +26,4 @@
     {{ entry_form.DELETE }}
     <label class="form-check-label" for="{{ entry_form.DELETE.id_for_label }}">{{ entry_form.DELETE.label }}</label>
   </div>
-</fieldset>
+</div>

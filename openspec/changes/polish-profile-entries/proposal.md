@@ -8,6 +8,7 @@ The profile screen exposes portfolio and experience as formatted JSON, and its e
 
 - Present projects and experience as readable entries with headings, descriptions and available supporting information.
 - Provide ordinary, repeatable project and experience fields in the student editor.
+- Identify saved entries clearly and reveal blank editor rows only when requested, while retaining the no-script fallback.
 - Preserve saved arrays, aliases, additional metadata and legacy entry types when unchanged.
 - Keep validation errors and submitted values visible, and prevent partial saves on invalid entries.
 - Retain existing ownership restrictions, JSON storage and compatibility with the original complete-form POST contract.
