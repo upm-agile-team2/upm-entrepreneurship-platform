@@ -51,6 +51,10 @@ class Idea(models.Model):
 
 
 class Feedback(models.Model):
+    class Status(models.TextChoices):
+        NORMAL = "normal", _("Normal")
+        RESOLVED = "resolved", _("Resolved")
+
     idea = models.ForeignKey(
         Idea,
         verbose_name=_("idea"),
@@ -66,9 +70,63 @@ class Feedback(models.Model):
     )
     text = models.TextField(_("text"), blank=False)
     timestamp = models.DateTimeField(_("timestamp"), auto_now_add=True)
+    is_private = models.BooleanField(_("private"), default=False)
+    status = models.CharField(
+        _("status"),
+        max_length=20,
+        choices=Status.choices,
+        default=Status.NORMAL,
+    )
 
     class Meta:
         ordering = ["timestamp"]
 
     def __str__(self):
         return f"Feedback on {self.idea}"
+
+
+class Reply(models.Model):
+    feedback = models.ForeignKey(
+        Feedback,
+        verbose_name=_("feedback"),
+        on_delete=models.CASCADE,
+        related_name="replies",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("author"),
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="feedback_replies",
+    )
+    text = models.TextField(_("text"), blank=False)
+    timestamp = models.DateTimeField(_("timestamp"), auto_now_add=True)
+
+    class Meta:
+        ordering = ["timestamp"]
+
+    def __str__(self):
+        return f"Reply to {self.feedback}"
+
+
+class Notification(models.Model):
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("recipient"),
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    feedback = models.ForeignKey(
+        Feedback,
+        verbose_name=_("feedback"),
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    created_at = models.DateTimeField(_("created at"), auto_now_add=True)
+    is_read = models.BooleanField(_("read"), default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Notification for {self.recipient} about {self.feedback}"

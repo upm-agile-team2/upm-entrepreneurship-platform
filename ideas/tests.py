@@ -18,7 +18,7 @@ from .management.commands.seed_demo_ideas import (
     DEMO_STUDENTS,
     demo_email,
 )
-from .models import Category, Feedback, Idea
+from .models import Category, Feedback, Idea, Notification, Reply
 
 User = get_user_model()
 
@@ -1119,3 +1119,217 @@ class IdeaAcceptanceJourneyTests(TestCase):
         self.assertContains(detail, edited_data["description"])
         self.assertContains(detail, self.health.name)
         self.assertNotContains(detail, self.technology.name)
+
+
+class FeedbackFeatureTests(TestCase):
+    def setUp(self):
+        self.owner = create_student("feedback-owner@example.com")
+        self.investor = User.objects.create_user(
+            email="feedback-investor@example.com",
+            password="Feedback-123!",
+            name="Feedback Investor",
+            role=User.Role.INVESTOR,
+        )
+        self.other_investor = User.objects.create_user(
+            email="feedback-other@example.com",
+            password="Feedback-123!",
+            name="Other Investor",
+            role=User.Role.INVESTOR,
+        )
+        self.idea = Idea.objects.create(
+            title="Feedback idea",
+            description="An idea that needs feedback.",
+            owner=self.owner,
+        )
+        self.detail_url = reverse("ideas:detail", args=[self.idea.pk])
+
+    def test_investor_can_submit_feedback_and_author_is_displayed(self):
+        self.client.force_login(self.investor)
+        response = self.client.post(
+            reverse("ideas:feedback", args=[self.idea.pk]),
+            {"text": "Consider validating the target audience."},
+        )
+
+        self.assertRedirects(response, self.detail_url)
+        feedback = Feedback.objects.get()
+        self.assertEqual(feedback.author, self.investor)
+        self.assertContains(self.client.get(self.detail_url), "Feedback Investor")
+        notification = Notification.objects.get()
+        self.assertEqual(notification.recipient, self.owner)
+        self.assertEqual(notification.feedback, feedback)
+        self.assertFalse(notification.is_read)
+
+    def test_invalid_feedback_does_not_create_notification(self):
+        self.client.force_login(self.investor)
+        self.client.post(
+            reverse("ideas:feedback", args=[self.idea.pk]),
+            {"text": "   "},
+        )
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_notifications_are_only_created_for_the_idea_owner(self):
+        other_owner = create_student("other-feedback-owner@example.com")
+        other_idea = Idea.objects.create(
+            title="Other feedback idea",
+            description="Another idea.",
+            owner=other_owner,
+        )
+        self.client.force_login(self.investor)
+        self.client.post(
+            reverse("ideas:feedback", args=[other_idea.pk]),
+            {"text": "A suggestion for this idea."},
+        )
+
+        self.assertFalse(Notification.objects.filter(recipient=self.owner).exists())
+        notification = Notification.objects.get()
+        self.assertEqual(notification.recipient, other_owner)
+        self.assertFalse(Notification.objects.filter(recipient=self.investor).exists())
+
+    def test_owner_can_open_notification_and_mark_it_read(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A useful suggestion.",
+        )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+
+        self.assertRedirects(
+            response,
+            f"{self.detail_url}#feedback-{feedback.pk}",
+        )
+        notification.refresh_from_db()
+        self.assertTrue(notification.is_read)
+
+    def test_user_cannot_open_another_users_notification(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A useful suggestion.",
+        )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
+        self.client.force_login(self.other_investor)
+
+        response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+
+        self.assertEqual(response.status_code, 404)
+        notification.refresh_from_db()
+        self.assertFalse(notification.is_read)
+
+    def test_notifications_page_requires_authentication(self):
+        response = self.client.get(reverse("ideas:notifications"))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('accounts:login')}?next={reverse('ideas:notifications')}",
+        )
+
+    def test_empty_feedback_is_rejected(self):
+        self.client.force_login(self.investor)
+        response = self.client.post(
+            reverse("ideas:feedback", args=[self.idea.pk]),
+            {"text": "   "},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please enter feedback.")
+        self.assertFalse(Feedback.objects.exists())
+
+    def test_private_feedback_is_visible_only_to_owner_and_author(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="This contains a sensitive question.",
+            is_private=True,
+        )
+
+        self.assertNotContains(self.client.get(self.detail_url), feedback.text)
+
+        self.client.force_login(self.other_investor)
+        self.assertNotContains(self.client.get(self.detail_url), feedback.text)
+
+        self.client.force_login(self.investor)
+        self.assertContains(self.client.get(self.detail_url), feedback.text)
+
+        self.client.force_login(self.owner)
+        owner_response = self.client.get(self.detail_url)
+        self.assertContains(owner_response, feedback.text)
+        self.assertContains(owner_response, "Private")
+
+    def test_owner_can_reply_to_feedback_and_toggle_status(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="The pricing needs more detail.",
+        )
+        self.client.force_login(self.owner)
+
+        reply_response = self.client.post(
+            reverse("ideas:reply", args=[feedback.pk]),
+            {"text": "We will add a pricing estimate."},
+        )
+        self.assertRedirects(reply_response, self.detail_url)
+        reply = Reply.objects.get()
+        self.assertEqual(reply.feedback, feedback)
+        self.assertEqual(reply.author, self.owner)
+        self.assertContains(self.client.get(self.detail_url), reply.text)
+
+        status_response = self.client.post(
+            reverse("ideas:feedback-status", args=[feedback.pk])
+        )
+        self.assertRedirects(status_response, self.detail_url)
+        feedback.refresh_from_db()
+        self.assertEqual(feedback.status, Feedback.Status.RESOLVED)
+        self.assertContains(self.client.get(self.detail_url), "Resolved")
+
+        self.client.post(reverse("ideas:feedback-status", args=[feedback.pk]))
+        feedback.refresh_from_db()
+        self.assertEqual(feedback.status, Feedback.Status.NORMAL)
+
+    def test_empty_reply_is_rejected(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="Please test this with students.",
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            reverse("ideas:reply", args=[feedback.pk]),
+            {"text": "  "},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please enter a reply.")
+        self.assertFalse(Reply.objects.exists())
+
+    def test_non_owner_cannot_reply_or_change_status(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A suggestion.",
+        )
+        self.client.force_login(self.other_investor)
+
+        reply_response = self.client.post(
+            reverse("ideas:reply", args=[feedback.pk]),
+            {"text": "Not allowed."},
+        )
+        self.assertEqual(reply_response.status_code, 403)
+        status_response = self.client.post(
+            reverse("ideas:feedback-status", args=[feedback.pk])
+        )
+        self.assertEqual(status_response.status_code, 403)

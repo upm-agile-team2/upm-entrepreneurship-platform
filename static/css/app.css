@@ -119,6 +119,15 @@ textarea.form-control { resize: vertical; min-height: 170px; line-height: 1.7; }
 .detail-description { font-size: 1rem; line-height: 1.75; color: var(--app-ink); overflow-wrap: anywhere; }
 .detail-description p { margin: 0; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; padding-top: 28px; border-top: 1px solid var(--app-border); }
+.feedback-section { margin-top: 24px; }
+.feedback-form { padding-bottom: 24px; border-bottom: 1px solid var(--app-border); }
+.feedback-item { padding: 20px 0; border-bottom: 1px solid var(--app-border); }
+.feedback-item:last-child { border-bottom: 0; }
+.feedback-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--app-muted); font-size: .82rem; }
+.feedback-meta strong { color: var(--app-ink); }
+.feedback-text { margin: 12px 0 16px; line-height: 1.65; overflow-wrap: anywhere; }
+.feedback-reply { margin: 20px 0 0 24px; padding: 16px; border-left: 3px solid var(--app-border); background: var(--app-canvas); }
+.reply-form textarea.form-control { min-height: 96px; }
 
 @media (max-width: 767.98px) {
   .navbar { min-height: 64px; padding-block: 12px; }
