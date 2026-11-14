@@ -1209,6 +1209,92 @@ class FeedbackFeatureTests(TestCase):
         notification.refresh_from_db()
         self.assertTrue(notification.is_read)
 
+    def test_owner_can_remove_notification_without_opening_feedback(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A useful suggestion.",
+        )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            reverse("ideas:dismiss-notification", args=[notification.pk])
+        )
+
+        self.assertRedirects(response, reverse("ideas:notifications"))
+        self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
+
+    def test_owner_can_mark_all_notifications_as_read(self):
+        feedbacks = [
+            Feedback.objects.create(
+                idea=self.idea,
+                author=self.investor,
+                text=f"Suggestion {index}.",
+            )
+            for index in range(2)
+        ]
+        Notification.objects.bulk_create(
+            [
+                Notification(recipient=self.owner, feedback=feedback)
+                for feedback in feedbacks
+            ]
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(reverse("ideas:mark-notifications-read"))
+
+        self.assertRedirects(response, reverse("ideas:notifications"))
+        self.assertFalse(
+            Notification.objects.filter(
+                recipient=self.owner,
+                is_read=False,
+            ).exists()
+        )
+
+    def test_unanswered_feedback_filter_excludes_replied_and_resolved_feedback(self):
+        unanswered = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="Still needs an answer.",
+        )
+        replied = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="Already answered.",
+        )
+        Reply.objects.create(
+            feedback=replied,
+            author=self.owner,
+            text="Thanks for the suggestion.",
+        )
+        resolved = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="Already resolved.",
+            status=Feedback.Status.RESOLVED,
+        )
+        Notification.objects.bulk_create(
+            [
+                Notification(recipient=self.owner, feedback=feedback)
+                for feedback in (unanswered, replied, resolved)
+            ]
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("ideas:notifications"),
+            {"filter": "unanswered"},
+        )
+
+        self.assertEqual(
+            list(response.context["notification_items"]),
+            [Notification.objects.get(feedback=unanswered)],
+        )
+
     def test_user_cannot_open_another_users_notification(self):
         feedback = Feedback.objects.create(
             idea=self.idea,
@@ -1275,6 +1361,10 @@ class FeedbackFeatureTests(TestCase):
             author=self.investor,
             text="The pricing needs more detail.",
         )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
         self.client.force_login(self.owner)
 
         reply_response = self.client.post(
@@ -1286,7 +1376,12 @@ class FeedbackFeatureTests(TestCase):
         self.assertEqual(reply.feedback, feedback)
         self.assertEqual(reply.author, self.owner)
         self.assertContains(self.client.get(self.detail_url), reply.text)
+        self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
 
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
         status_response = self.client.post(
             reverse("ideas:feedback-status", args=[feedback.pk])
         )
@@ -1294,6 +1389,7 @@ class FeedbackFeatureTests(TestCase):
         feedback.refresh_from_db()
         self.assertEqual(feedback.status, Feedback.Status.RESOLVED)
         self.assertContains(self.client.get(self.detail_url), "Resolved")
+        self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
 
         self.client.post(reverse("ideas:feedback-status", args=[feedback.pk]))
         feedback.refresh_from_db()

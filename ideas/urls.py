@@ -18,6 +18,16 @@ urlpatterns = [
     path("ideas/<int:idea_id>/edit/", views.edit_idea, name="edit"),
     path("notifications/", views.notifications, name="notifications"),
     path(
+        "notifications/read-all/",
+        views.mark_notifications_read,
+        name="mark-notifications-read",
+    ),
+    path(
+        "notifications/<int:notification_id>/dismiss/",
+        views.dismiss_notification,
+        name="dismiss-notification",
+    ),
+    path(
         "notifications/<int:notification_id>/",
         views.open_notification,
         name="open-notification",
