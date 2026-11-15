@@ -1153,11 +1153,29 @@ class FeedbackFeatureTests(TestCase):
         self.assertRedirects(response, self.detail_url)
         feedback = Feedback.objects.get()
         self.assertEqual(feedback.author, self.investor)
-        self.assertContains(self.client.get(self.detail_url), "Feedback Investor")
+        detail_response = self.client.get(self.detail_url)
+        self.assertContains(detail_response, "Feedback Investor")
+        self.assertContains(detail_response, "Consider validating the target audience.")
         notification = Notification.objects.get()
         self.assertEqual(notification.recipient, self.owner)
         self.assertEqual(notification.feedback, feedback)
         self.assertFalse(notification.is_read)
+
+    def test_idea_owner_can_view_feedback_and_empty_state(self):
+        self.client.force_login(self.owner)
+
+        empty_response = self.client.get(self.detail_url)
+        self.assertContains(empty_response, "No feedback yet")
+
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="Try testing this with first-year students.",
+        )
+        response = self.client.get(self.detail_url)
+
+        self.assertContains(response, feedback.text)
+        self.assertContains(response, self.investor.name)
 
     def test_invalid_feedback_does_not_create_notification(self):
         self.client.force_login(self.investor)
@@ -1228,6 +1246,25 @@ class FeedbackFeatureTests(TestCase):
         self.assertRedirects(response, reverse("ideas:notifications"))
         self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
 
+    def test_user_cannot_dismiss_another_users_notification(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A useful suggestion.",
+        )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
+        self.client.force_login(self.other_investor)
+
+        response = self.client.post(
+            reverse("ideas:dismiss-notification", args=[notification.pk])
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Notification.objects.filter(pk=notification.pk).exists())
+
     def test_owner_can_mark_all_notifications_as_read(self):
         feedbacks = [
             Feedback.objects.create(
@@ -1237,10 +1274,33 @@ class FeedbackFeatureTests(TestCase):
             )
             for index in range(2)
         ]
+        other_owner = create_student("other-notification-owner@example.com")
+        other_idea = Idea.objects.create(
+            title="Other notification idea",
+            description="An idea owned by someone else.",
+            owner=other_owner,
+        )
+        other_feedback = Feedback.objects.create(
+            idea=other_idea,
+            author=self.investor,
+            text="A suggestion for another student.",
+        )
         Notification.objects.bulk_create(
             [
                 Notification(recipient=self.owner, feedback=feedback)
                 for feedback in feedbacks
+            ]
+            + [
+                Notification(
+                    recipient=self.owner,
+                    feedback=Feedback.objects.create(
+                        idea=self.idea,
+                        author=self.investor,
+                        text="An already read suggestion.",
+                    ),
+                    is_read=True,
+                ),
+                Notification(recipient=other_owner, feedback=other_feedback),
             ]
         )
         self.client.force_login(self.owner)
@@ -1254,6 +1314,66 @@ class FeedbackFeatureTests(TestCase):
                 is_read=False,
             ).exists()
         )
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=other_owner,
+                feedback=other_feedback,
+                is_read=False,
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.owner,
+                is_read=True,
+            ).exists()
+        )
+
+    def test_notification_state_changes_reject_get_requests(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A useful suggestion.",
+        )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
+        self.client.force_login(self.owner)
+
+        dismiss_response = self.client.get(
+            reverse("ideas:dismiss-notification", args=[notification.pk])
+        )
+        mark_all_response = self.client.get(reverse("ideas:mark-notifications-read"))
+
+        self.assertEqual(dismiss_response.status_code, 403)
+        self.assertEqual(mark_all_response.status_code, 403)
+        notification.refresh_from_db()
+        self.assertFalse(notification.is_read)
+        self.assertTrue(Notification.objects.filter(pk=notification.pk).exists())
+
+    def test_notification_state_changes_require_csrf_tokens(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A useful suggestion.",
+        )
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=feedback,
+        )
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.owner)
+
+        dismiss_response = csrf_client.post(
+            reverse("ideas:dismiss-notification", args=[notification.pk])
+        )
+        mark_all_response = csrf_client.post(reverse("ideas:mark-notifications-read"))
+
+        self.assertEqual(dismiss_response.status_code, 403)
+        self.assertEqual(mark_all_response.status_code, 403)
+        notification.refresh_from_db()
+        self.assertFalse(notification.is_read)
+        self.assertTrue(Notification.objects.filter(pk=notification.pk).exists())
 
     def test_unanswered_feedback_filter_excludes_replied_and_resolved_feedback(self):
         unanswered = Feedback.objects.create(
@@ -1325,23 +1445,30 @@ class FeedbackFeatureTests(TestCase):
 
     def test_empty_feedback_is_rejected(self):
         self.client.force_login(self.investor)
-        response = self.client.post(
-            reverse("ideas:feedback", args=[self.idea.pk]),
-            {"text": "   "},
-        )
+        for data in ({"text": "   "}, {"text": "   ", "is_private": "on"}):
+            with self.subTest(data=data):
+                response = self.client.post(
+                    reverse("ideas:feedback", args=[self.idea.pk]), data
+                )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Please enter feedback.")
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Please enter feedback.")
         self.assertFalse(Feedback.objects.exists())
 
     def test_private_feedback_is_visible_only_to_owner_and_author(self):
-        feedback = Feedback.objects.create(
-            idea=self.idea,
-            author=self.investor,
-            text="This contains a sensitive question.",
-            is_private=True,
+        self.client.force_login(self.investor)
+        response = self.client.post(
+            reverse("ideas:feedback", args=[self.idea.pk]),
+            {
+                "text": "This contains a sensitive question.",
+                "is_private": "on",
+            },
         )
+        self.assertRedirects(response, self.detail_url)
+        feedback = Feedback.objects.get()
+        self.assertTrue(feedback.is_private)
 
+        self.client.logout()
         self.assertNotContains(self.client.get(self.detail_url), feedback.text)
 
         self.client.force_login(self.other_investor)
@@ -1391,6 +1518,10 @@ class FeedbackFeatureTests(TestCase):
         self.assertContains(self.client.get(self.detail_url), "Resolved")
         self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
 
+        self.client.force_login(self.other_investor)
+        self.assertContains(self.client.get(self.detail_url), "Resolved")
+
+        self.client.force_login(self.owner)
         self.client.post(reverse("ideas:feedback-status", args=[feedback.pk]))
         feedback.refresh_from_db()
         self.assertEqual(feedback.status, Feedback.Status.NORMAL)
