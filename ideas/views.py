@@ -109,6 +109,7 @@ def submit_reply(request, feedback_id):
         reply.feedback = feedback
         reply.author = request.user
         reply.save()
+        Notification.objects.filter(feedback=feedback).delete()
         messages.success(request, _("Your reply has been submitted."))
         return redirect("ideas:detail", idea_id=feedback.idea_id)
     return _render_idea_detail_with_reply_form(request, feedback.idea, feedback, form)
@@ -124,12 +125,15 @@ def toggle_feedback_status(request, feedback_id):
     )
     if not request.user.is_student or feedback.idea.owner_id != request.user.pk:
         raise PermissionDenied
+    was_resolved = feedback.status == Feedback.Status.RESOLVED
     feedback.status = (
         Feedback.Status.NORMAL
-        if feedback.status == Feedback.Status.RESOLVED
+        if was_resolved
         else Feedback.Status.RESOLVED
     )
     feedback.save(update_fields=["status"])
+    if not was_resolved:
+        Notification.objects.filter(feedback=feedback).delete()
     return redirect("ideas:detail", idea_id=feedback.idea_id)
 
 
@@ -221,11 +225,44 @@ def notifications(request):
     notification_items = Notification.objects.filter(
         recipient=request.user
     ).select_related("feedback__idea", "feedback__author")
+    notification_filter = request.GET.get("filter")
+    if notification_filter == "unanswered":
+        notification_items = notification_items.filter(
+            feedback__status=Feedback.Status.NORMAL,
+            feedback__replies__isnull=True,
+        )
     return render(
         request,
         "ideas/notifications.html",
-        {"notification_items": notification_items},
+        {
+            "notification_items": notification_items.distinct(),
+            "notification_filter": notification_filter,
+        },
     )
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+def dismiss_notification(request, notification_id):
+    if request.method != "POST":
+        raise PermissionDenied
+    notification = get_object_or_404(
+        Notification,
+        pk=notification_id,
+        recipient=request.user,
+    )
+    notification.delete()
+    return redirect("ideas:notifications")
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+def mark_notifications_read(request):
+    if request.method != "POST":
+        raise PermissionDenied
+    Notification.objects.filter(
+        recipient=request.user,
+        is_read=False,
+    ).update(is_read=True)
+    return redirect("ideas:notifications")
 
 
 @login_required(login_url=reverse_lazy("accounts:login"))

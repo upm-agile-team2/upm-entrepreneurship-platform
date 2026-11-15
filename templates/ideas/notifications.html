@@ -7,31 +7,63 @@
   <section class="detail-surface" aria-labelledby="notifications-heading">
     <header class="section-heading">
       <h1 id="notifications-heading">{% translate "Notifications" %}</h1>
+      <div class="d-flex flex-wrap gap-2">
+        <a
+          href="{% url 'ideas:notifications' %}"
+          class="btn btn-sm {% if not notification_filter %}btn-primary{% else %}btn-outline-primary{% endif %}"
+          {% if not notification_filter %}aria-current="page"{% endif %}
+        >
+          {% translate "All notifications" %}
+        </a>
+        <a
+          href="{% url 'ideas:notifications' %}?filter=unanswered"
+          class="btn btn-sm {% if notification_filter == 'unanswered' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+          {% if notification_filter == 'unanswered' %}aria-current="page"{% endif %}
+        >
+          {% translate "No answered feedback" %}
+        </a>
+        {% if unread_notification_count %}
+          <form method="post" action="{% url 'ideas:mark-notifications-read' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-outline-secondary">
+              {% translate "Mark all as read" %}
+            </button>
+          </form>
+        {% endif %}
+      </div>
     </header>
 
     {% for notification in notification_items %}
-      <a
-        href="{% url 'ideas:open-notification' notification.pk %}"
-        class="d-block text-decoration-none border-bottom py-3{% if not notification.is_read %} fw-semibold{% endif %}"
-        {% if not notification.is_read %}aria-label="{% translate 'Unread notification' %}"{% endif %}
-      >
-        <span>
-          {% blocktranslate with idea_title=notification.feedback.idea.title %}
-            New feedback on "{{ idea_title }}"
-          {% endblocktranslate %}
-        </span>
-        <small class="d-block text-muted">
-          {% if notification.feedback.author %}
-            {% blocktranslate with author=notification.feedback.author.name %}
-              From {{ author }}
+      <div class="d-flex align-items-center gap-3 border-bottom py-3">
+        <a
+          href="{% url 'ideas:open-notification' notification.pk %}"
+          class="flex-grow-1 text-decoration-none{% if not notification.is_read %} fw-semibold{% endif %}"
+          {% if not notification.is_read %}aria-label="{% translate 'Unread notification' %}"{% endif %}
+        >
+          <span>
+            {% blocktranslate with idea_title=notification.feedback.idea.title %}
+              New feedback on "{{ idea_title }}"
             {% endblocktranslate %}
-            ·
-          {% endif %}
-          <time datetime="{{ notification.created_at|date:'c' }}">
-            {{ notification.created_at|date:"M j, Y" }}
-          </time>
-        </small>
-      </a>
+          </span>
+          <small class="d-block text-muted">
+            {% if notification.feedback.author %}
+              {% blocktranslate with author=notification.feedback.author.name %}
+                From {{ author }}
+              {% endblocktranslate %}
+              ·
+            {% endif %}
+            <time datetime="{{ notification.created_at|date:'c' }}">
+              {{ notification.created_at|date:"M j, Y" }}
+            </time>
+          </small>
+        </a>
+        <form method="post" action="{% url 'ideas:dismiss-notification' notification.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm btn-outline-secondary">
+            {% translate "Remove" %}
+          </button>
+        </form>
+      </div>
     {% empty %}
       <div class="empty-state">
         <h2>{% translate "No notifications yet" %}</h2>
