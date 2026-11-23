@@ -4,9 +4,10 @@ from django import forms
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.core.validators import URLValidator
+from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
-from .models import Skill, StudentProfile, User
+from .models import InvestorInterest, InvestorProfile, Skill, StudentProfile, User
 from .profile_entries import ENTRY_FIELDS, entry_fields, present_entry
 
 
@@ -18,6 +19,62 @@ class BootstrapFormMixin:
         for field in self.fields.values():
             style = "form-select" if isinstance(field.widget, forms.Select) else "form-control"
             field.widget.attrs["class"] = style
+
+
+class InvestorProfileForm(BootstrapFormMixin, forms.ModelForm):
+    interest_names = forms.CharField(
+        label=_("Interests and areas of expertise"),
+        required=False,
+        max_length=1000,
+        help_text=_("Enter up to 10 interests separated by commas, for example Robotics, Clean energy."),
+    )
+    field_order = ("bio", "interest_names", "experience", "past_projects", "support_offers")
+
+    class Meta:
+        model = InvestorProfile
+        fields = ("bio", "experience", "past_projects", "support_offers")
+        widgets = {
+            "bio": forms.Textarea(attrs={"rows": 3}),
+            "experience": forms.Textarea(attrs={"rows": 3}),
+            "past_projects": forms.Textarea(attrs={"rows": 3}),
+            "support_offers": forms.Textarea(attrs={"rows": 3}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk and not self.is_bound:
+            self.initial["interest_names"] = ", ".join(
+                interest.name for interest in self.instance.interests.all()
+            )
+
+    def clean_interest_names(self):
+        names_by_key = {}
+        for value in self.cleaned_data["interest_names"].split(","):
+            name = " ".join(value.split())
+            if not name:
+                continue
+            if len(name) > 80:
+                raise ValidationError(_("Each interest must be 80 characters or fewer."))
+            names_by_key.setdefault(name.casefold(), name)
+        if len(names_by_key) > 10:
+            raise ValidationError(_("Enter no more than 10 different interests."))
+        return names_by_key
+
+    @transaction.atomic
+    def save_for(self, investor):
+        profile, _ = InvestorProfile.objects.update_or_create(
+            user=investor,
+            defaults={name: self.cleaned_data[name] for name in self.Meta.fields},
+        )
+        interests = []
+        for key, name in sorted(self.cleaned_data["interest_names"].items()):
+            interest, _ = InvestorInterest.objects.get_or_create(
+                normalized_name=key,
+                defaults={"name": name},
+            )
+            interests.append(interest)
+        profile.interests.set(interests)
+        return profile
 
 
 class EmailAuthenticationForm(BootstrapFormMixin, AuthenticationForm):
