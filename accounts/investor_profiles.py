@@ -39,6 +39,32 @@ def find_investor_profiles(interest=None):
 
 @require_GET
 @login_required(login_url=reverse_lazy("accounts:login"))
+def investor_discovery(request):
+    if not request.user.is_student:
+        raise PermissionDenied
+
+    form = InvestorInterestFilterForm(request.GET)
+    selected_interest = None
+    profiles = []
+    if form.is_valid():
+        selected_interest = form.cleaned_data["interest"]
+        profiles = list(find_investor_profiles(selected_interest))
+
+    return render(
+        request,
+        "accounts/investor_discovery.html",
+        {
+            "filter_form": form,
+            "profiles": profiles,
+            "profile_count": len(profiles),
+            "selected_interest": selected_interest,
+            "has_filter": bool(request.GET.get("interest")),
+        },
+    )
+
+
+@require_GET
+@login_required(login_url=reverse_lazy("accounts:login"))
 def investor_profile_detail(request, investor_id):
     if not request.user.is_student:
         raise PermissionDenied

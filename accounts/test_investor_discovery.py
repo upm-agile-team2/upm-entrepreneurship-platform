@@ -159,3 +159,58 @@ class InvestorDiscoveryTests(TestCase):
                 form = InvestorInterestFilterForm({"interest": value})
                 self.assertFalse(form.is_valid())
                 self.assertIn("interest", form.errors)
+
+    def test_only_students_can_browse_investors_and_see_the_navigation_link(self):
+        url = reverse("accounts:investor_discovery")
+        self.assertRedirects(self.client.get(url), f"{reverse('accounts:login')}?next={url}")
+        self.client.force_login(self.avery)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertNotContains(self.client.get(reverse("ideas:home")), f'href="{url}"')
+        self.client.force_login(self.student)
+        response = self.client.get(url)
+        self.assertContains(response, f'href="{url}" aria-current="page">Investors</a>')
+        self.assertNotContains(response, self.avery.email)
+        self.assertEqual(self.client.post(url).status_code, 405)
+
+    def test_student_filters_opens_a_result_and_clears_the_filter(self):
+        self.client.force_login(self.student)
+        url = reverse("accounts:investor_discovery")
+        response = self.client.get(url, {"interest": self.clean_energy.pk})
+        profile_url = reverse("accounts:investor_profile_detail", args=[self.avery.pk])
+        self.assertContains(response, f'href="{profile_url}">{self.avery.name}</a>')
+        self.assertNotContains(response, self.casey.name)
+        self.assertNotContains(response, self.inactive.name)
+        self.assertContains(response, f'value="{self.clean_energy.pk}" selected')
+        self.assertContains(self.client.get(profile_url), "Product mentoring")
+        self.assertContains(response, f'href="{url}">Clear filter</a>')
+        unfiltered = self.client.get(url)
+        self.assertContains(unfiltered, self.avery.name)
+        self.assertContains(unfiltered, self.casey.name)
+        self.assertNotContains(unfiltered, "Clear filter")
+
+    def test_no_matches_invalid_selection_and_empty_directory_have_distinct_states(self):
+        self.client.force_login(self.student)
+        url = reverse("accounts:investor_discovery")
+        no_matches = self.client.get(url, {"interest": self.biotech.pk})
+        self.assertContains(no_matches, "No matching investor profiles")
+        self.assertNotContains(no_matches, self.avery.name)
+        invalid = self.client.get(url, {"interest": "bad-input"})
+        self.assertContains(invalid, "Check your interest selection")
+        self.assertNotContains(invalid, self.avery.name)
+        InvestorProfile.objects.all().delete()
+        self.assertContains(self.client.get(url), "No investor profiles yet")
+
+    def test_saved_profile_can_be_found_from_the_student_directory(self):
+        self.client.force_login(self.avery)
+        self.client.post(
+            reverse("accounts:edit_investor_profile"),
+            {"interest_names": "Social entrepreneurship", "past_projects": "Campus food rescue"},
+        )
+        new_interest = InvestorInterest.objects.get(normalized_name="social entrepreneurship")
+        self.client.force_login(self.student)
+        response = self.client.get(
+            reverse("accounts:investor_discovery"), {"interest": new_interest.pk}
+        )
+        profile_url = reverse("accounts:investor_profile_detail", args=[self.avery.pk])
+        self.assertContains(response, f'href="{profile_url}"')
+        self.assertContains(self.client.get(profile_url), "Campus food rescue")

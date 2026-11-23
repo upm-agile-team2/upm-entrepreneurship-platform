@@ -12,6 +12,8 @@
       </div>
       {% if is_own_profile and profile %}
         <a class="btn btn-primary" href="{% url 'accounts:edit_investor_profile' %}">{% translate "Edit profile" %}</a>
+      {% elif not is_own_profile %}
+        <a class="btn btn-outline-secondary" href="{% url 'accounts:investor_discovery' %}">{% translate "Back to investors" %}</a>
       {% endif %}
     </header>
 

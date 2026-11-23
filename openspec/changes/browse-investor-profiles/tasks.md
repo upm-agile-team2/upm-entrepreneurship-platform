@@ -8,8 +8,10 @@
 ## 2. Investor discovery
 
 - [x] 2.1 T58 (#111): implement the interest filter and scoped query. Test valid, empty, and invalid selections and related data loading.
-- [ ] 2.2 T59 (#112): build the directory, student navigation, and filter controls. Test matching results, no matches, and restoring the full list.
+- [x] 2.2 T59 (#112): build the directory, student navigation, and filter controls. Test matching results, no matches, and restoring the full list.
 
 ## 3. Verification
 
-- [ ] 3.1 Run `python manage.py test`, verify migration consistency and strict OpenSpec validation, and review the Definition of Done.
+- [x] 3.1 Run `python manage.py test`, verify migration consistency and strict OpenSpec validation, and review the Definition of Done.
+
+Local verification: all 246 Django tests passed. Wireframe agreement, peer review, and Sprint Review acceptance are still pending.
