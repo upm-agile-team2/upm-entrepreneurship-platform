@@ -70,3 +70,37 @@ class InvestorProfileDetailTests(TestCase):
             list(response.context["public_feedback"]),
             [self.new_feedback, self.old_feedback],
         )
+
+    def test_student_can_open_a_profile_from_feedback_and_read_available_details(self):
+        self.client.force_login(self.student)
+        idea_url = reverse("ideas:detail", args=[self.idea.pk])
+        idea_response = self.client.get(idea_url)
+        self.assertContains(idea_response, f'href="{self.url}">{self.investor.name}</a>')
+        no_profile_url = reverse("accounts:investor_profile_detail", args=[self.other_investor.pk])
+        self.assertNotContains(idea_response, f'href="{no_profile_url}"')
+
+        response = self.client.get(self.url)
+        for value in (
+            "Experience with energy startups",
+            "Campus microgrid",
+            "Clean energy",
+            self.old_feedback.text,
+            self.new_feedback.text,
+        ):
+            self.assertContains(response, value)
+        self.assertContains(response, f'href="{idea_url}#feedback-{self.new_feedback.pk}"')
+        self.assertNotContains(response, self.private.text)
+        self.assertNotContains(response, self.other_feedback.text)
+        self.assertNotContains(response, self.investor.email)
+        self.assertNotContains(response, reverse("accounts:edit_investor_profile"))
+
+    def test_incomplete_profile_shows_its_available_information(self):
+        InvestorProfile.objects.create(user=self.other_investor, bio="Ready to mentor.")
+        self.other_feedback.delete()
+        self.client.force_login(self.student)
+        response = self.client.get(
+            reverse("accounts:investor_profile_detail", args=[self.other_investor.pk])
+        )
+        self.assertContains(response, "Ready to mentor.")
+        self.assertContains(response, "No experience added yet.")
+        self.assertContains(response, "No public feedback yet.")

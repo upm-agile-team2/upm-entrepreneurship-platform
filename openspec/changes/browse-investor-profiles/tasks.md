@@ -3,7 +3,7 @@
 ## 1. Investor profile details
 
 - [x] 1.1 T56 (#109): retrieve saved investor profiles and public feedback for students. Test account and role restrictions and feedback visibility.
-- [ ] 1.2 T57 (#110): render profile information and feedback and link from visible comments. Test navigation and incomplete profiles.
+- [x] 1.2 T57 (#110): render profile information and feedback and link from visible comments. Test navigation and incomplete profiles.
 
 ## 2. Investor discovery
 

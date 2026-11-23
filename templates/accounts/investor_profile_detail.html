@@ -73,5 +73,26 @@
         </div>
       </div>
     {% endif %}
+
+    {% if not is_own_profile %}
+      <section class="card profile-section mt-4" aria-labelledby="investor-feedback-title">
+        <div class="card-body">
+          <h2 id="investor-feedback-title" class="h4">{% translate "Public feedback" %}</h2>
+          <ul class="list-unstyled profile-entries mb-0">
+            {% for item in public_feedback %}
+              <li>
+                <div class="feedback-meta">
+                  <a class="idea-author text-break" href="{% url 'ideas:detail' item.idea_id %}#feedback-{{ item.pk }}">{{ item.idea.title }}</a>
+                  <time datetime="{{ item.timestamp|date:'c' }}">{{ item.timestamp|date:"M j, Y" }}</time>
+                </div>
+                <p class="feedback-text mb-0">{{ item.text|linebreaksbr }}</p>
+              </li>
+            {% empty %}
+              <li class="text-body-secondary">{% translate "No public feedback yet." %}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </section>
+    {% endif %}
   </section>
 {% endblock %}
