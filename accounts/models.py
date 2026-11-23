@@ -2,6 +2,7 @@ from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.db import models
 from django.db.models import F, Q
 from django.db.models.functions import Lower
@@ -112,6 +113,34 @@ class StudentProfile(models.Model):
         _("portfolio projects"), blank=True, default=list
     )
     experience = models.JSONField(_("experience"), blank=True, default=list)
+    instagram_url = models.URLField(
+        _("Instagram URL"),
+        max_length=500,
+        blank=True,
+        default="",
+        validators=[URLValidator(schemes=["http", "https"])],
+    )
+    twitter_url = models.URLField(
+        _("Twitter URL"),
+        max_length=500,
+        blank=True,
+        default="",
+        validators=[URLValidator(schemes=["http", "https"])],
+    )
+    youtube_url = models.URLField(
+        _("YouTube URL"),
+        max_length=500,
+        blank=True,
+        default="",
+        validators=[URLValidator(schemes=["http", "https"])],
+    )
+    github_url = models.URLField(
+        _("GitHub URL"),
+        max_length=500,
+        blank=True,
+        default="",
+        validators=[URLValidator(schemes=["http", "https"])],
+    )
 
     def clean(self):
         super().clean()
