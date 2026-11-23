@@ -3,6 +3,7 @@ from django.urls import reverse
 
 from ideas.models import Feedback, Idea
 
+from .investor_profiles import InvestorInterestFilterForm, find_investor_profiles
 from .models import InvestorInterest, InvestorProfile, User
 
 
@@ -104,3 +105,57 @@ class InvestorProfileDetailTests(TestCase):
         self.assertContains(response, "Ready to mentor.")
         self.assertContains(response, "No experience added yet.")
         self.assertContains(response, "No public feedback yet.")
+
+
+class InvestorDiscoveryTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.student = User.objects.create_user(
+            email="student@example.com", name="Blair Student", role=User.Role.STUDENT
+        )
+        cls.avery = User.objects.create_user(
+            email="avery@example.com", name="Avery Investor", role=User.Role.INVESTOR
+        )
+        cls.casey = User.objects.create_user(
+            email="casey@example.com", name="Casey Investor", role=User.Role.INVESTOR
+        )
+        cls.inactive = User.objects.create_user(
+            email="inactive@example.com", name="Hidden Investor", role=User.Role.INVESTOR,
+            is_active=False,
+        )
+        cls.clean_energy = InvestorInterest.objects.create(
+            name="Clean energy", normalized_name="clean energy"
+        )
+        cls.robotics = InvestorInterest.objects.create(name="Robotics", normalized_name="robotics")
+        cls.biotech = InvestorInterest.objects.create(name="Biotech", normalized_name="biotech")
+        cls.avery_profile = InvestorProfile.objects.create(
+            user=cls.avery, bio="I advise early ventures.", support_offers="Product mentoring"
+        )
+        cls.avery_profile.interests.add(cls.clean_energy, cls.robotics)
+        cls.casey_profile = InvestorProfile.objects.create(user=cls.casey)
+        cls.casey_profile.interests.add(cls.robotics)
+        InvestorProfile.objects.create(user=cls.inactive).interests.add(cls.clean_energy)
+
+    def test_filter_selects_only_matching_active_profiles_and_fetches_related_data_in_bulk(self):
+        with self.assertNumQueries(2):
+            profiles = [
+                (profile.user.name, [interest.name for interest in profile.interests.all()])
+                for profile in find_investor_profiles(self.clean_energy)
+            ]
+        self.assertEqual(profiles, [("Avery Investor", ["Clean energy", "Robotics"])])
+        self.assertEqual(
+            list(find_investor_profiles()), [self.avery_profile, self.casey_profile]
+        )
+        self.assertFalse(find_investor_profiles(self.biotech).exists())
+
+    def test_filter_form_accepts_empty_or_current_interest_and_rejects_bad_ids(self):
+        for value, expected in (("", None), (str(self.robotics.pk), self.robotics)):
+            with self.subTest(value=value):
+                form = InvestorInterestFilterForm({"interest": value})
+                self.assertTrue(form.is_valid())
+                self.assertEqual(form.cleaned_data["interest"], expected)
+        for value in ("not-an-id", "999999", "9" * 100):
+            with self.subTest(value=value):
+                form = InvestorInterestFilterForm({"interest": value})
+                self.assertFalse(form.is_valid())
+                self.assertIn("interest", form.errors)

@@ -7,7 +7,7 @@
 
 ## 2. Investor discovery
 
-- [ ] 2.1 T58 (#111): implement the interest filter and scoped query. Test valid, empty, and invalid selections and related data loading.
+- [x] 2.1 T58 (#111): implement the interest filter and scoped query. Test valid, empty, and invalid selections and related data loading.
 - [ ] 2.2 T59 (#112): build the directory, student navigation, and filter controls. Test matching results, no matches, and restoring the full list.
 
 ## 3. Verification
