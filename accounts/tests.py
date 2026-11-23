@@ -970,6 +970,94 @@ class StudentProfilePresentationTests(TestCase):
         self.assertNotContains(response, 'name="experience"')
         self.assertContains(response, "No skills are available to select yet.")
         self.assertContains(response, self.own_profile_url)
+        for platform in ("instagram", "twitter", "youtube", "github"):
+            with self.subTest(platform=platform):
+                self.assertContains(response, f'name="{platform}_url"')
+                self.assertContains(response, f'for="id_{platform}_url"')
+
+    def test_editor_displays_social_url_errors_and_preserves_entered_values(self):
+        self.client.force_login(self.student)
+        response = self.client.post(
+            self.edit_url,
+            {
+                "profile_entries_editor": "1",
+                "projects-TOTAL_FORMS": "0",
+                "projects-INITIAL_FORMS": "0",
+                "experience-TOTAL_FORMS": "0",
+                "experience-INITIAL_FORMS": "0",
+                "github_url": "not-a-url",
+                "instagram_url": "https://www.instagram.com/example/",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="id_github_url_error"')
+        self.assertContains(response, "Enter a valid URL.")
+        self.assertContains(response, 'value="not-a-url"')
+        self.assertContains(response, 'value="https://www.instagram.com/example/"')
+        self.assertFalse(StudentProfile.objects.filter(user=self.student).exists())
+
+    def test_owner_and_investor_see_clickable_social_icons(self):
+        urls = {
+            "instagram": "https://www.instagram.com/example/",
+            "twitter": "https://twitter.com/example",
+            "youtube": "https://www.youtube.com/@example",
+            "github": "https://github.com/example",
+        }
+        StudentProfile.objects.create(
+            user=self.student,
+            **{f"{platform}_url": url for platform, url in urls.items()},
+        )
+
+        for viewer, page in (
+            (self.student, self.own_profile_url),
+            (self.investor, self.investor_profile_url),
+        ):
+            with self.subTest(viewer=viewer.role):
+                self.client.force_login(viewer)
+                response = self.client.get(page)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'id="profile-social-title"')
+                self.assertContains(response, 'target="_blank" rel="noopener noreferrer"', count=4)
+                for platform, url in urls.items():
+                    self.assertContains(response, f'href="{url}"')
+                    self.assertContains(response, f'data-social-icon="{platform}"')
+
+    def test_profile_only_displays_filled_social_icons_and_hides_empty_section(self):
+        profile = StudentProfile.objects.create(
+            user=self.student, github_url="https://github.com/example"
+        )
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.investor_profile_url)
+        self.assertContains(response, 'data-social-icon="github"')
+        for platform in ("instagram", "twitter", "youtube"):
+            self.assertNotContains(response, f'data-social-icon="{platform}"')
+
+        profile.github_url = ""
+        profile.save()
+        response = self.client.get(self.investor_profile_url)
+        self.assertNotContains(response, 'id="profile-social-title"')
+        self.assertNotContains(response, "data-social-icon=")
+
+    def test_profile_does_not_render_invalid_urls_stored_outside_the_form(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            bio="A visible bio",
+            instagram_url="not-a-url",
+            twitter_url="javascript:alert(1)",
+            youtube_url="data:text/html,test",
+            github_url="ftp://github.com/example",
+        )
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.investor_profile_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A visible bio")
+        self.assertNotContains(response, 'id="profile-social-title"')
+        self.assertNotContains(response, "data-social-icon=")
+        self.assertNotContains(response, "javascript:")
 
     def test_my_profile_navigation_is_student_only(self):
         home_url = reverse("ideas:home")
