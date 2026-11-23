@@ -109,3 +109,40 @@ class InvestorProfileEditorTests(TestCase):
         client.force_login(self.investor)
         self.assertEqual(client.post(self.editor, {"bio": "Blocked"}).status_code, 403)
         self.assertFalse(InvestorProfile.objects.exists())
+
+    def test_navigate_to_profile_create_and_preview_saved_changes(self):
+        self.client.force_login(self.investor)
+        own_profile = reverse("accounts:my_investor_profile")
+        home = self.client.get(reverse("ideas:home"))
+        self.assertContains(home, f'href="{own_profile}">My profile</a>')
+        self.assertContains(self.client.get(own_profile), f'href="{self.editor}">Create your profile</a>')
+
+        response = self.client.post(
+            self.editor,
+            {
+                "bio": "I advise student founders.",
+                "experience": "Renewable energy consulting",
+                "past_projects": "Campus microgrid",
+                "interest_names": "Clean energy",
+                "support_offers": "Mentoring",
+            },
+            follow=True,
+        )
+        self.assertRedirects(response, own_profile)
+        for value in (
+            "I advise student founders.",
+            "Renewable energy consulting",
+            "Campus microgrid",
+            "Clean energy",
+            "Mentoring",
+        ):
+            self.assertContains(response, value)
+        self.assertContains(response, f'href="{self.editor}">Edit profile</a>')
+
+        response = self.client.post(self.editor, {"experience": "New experience"}, follow=True)
+        self.assertContains(response, "New experience")
+        self.assertNotContains(response, "Renewable energy consulting")
+
+    def test_student_cannot_open_investor_owner_preview(self):
+        self.client.force_login(self.student)
+        self.assertEqual(self.client.get(reverse("accounts:my_investor_profile")).status_code, 403)

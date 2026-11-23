@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .discovery import student_discovery
-from .investor_profiles import edit_investor_profile
+from .investor_profiles import edit_investor_profile, my_investor_profile
 from .views import (
     AccountLoginView,
     AccountLogoutView,
@@ -18,6 +18,7 @@ app_name = "accounts"
 
 urlpatterns = [
     path("students/", student_discovery, name="student_discovery"),
+    path("investors/me/", my_investor_profile, name="my_investor_profile"),
     path("investors/me/edit/", edit_investor_profile, name="edit_investor_profile"),
     path("login/", AccountLoginView.as_view(), name="login"),
     path("signup/", signup, name="signup"),
