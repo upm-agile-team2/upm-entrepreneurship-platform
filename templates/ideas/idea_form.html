@@ -13,7 +13,27 @@
     <div class="form-surface">
       <form method="post" novalidate>
         {% csrf_token %}
-        {% include "includes/form_fields.html" %}
+        {% if form.non_field_errors %}<div class="form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+        {% include "includes/form_fields.html" with form=idea_fields %}
+        <fieldset class="form-field" aria-describedby="{{ form.required_support.auto_id }}_helptext{% if form.required_support.errors %} {{ form.required_support.auto_id }}_error{% endif %}"{% if form.required_support.errors %} aria-invalid="true"{% endif %}>
+          <legend class="form-label">
+            {{ form.required_support.label }} <span class="field-optional">({% translate "optional" %})</span>
+          </legend>
+          <div class="d-flex flex-wrap gap-3">
+            {% for choice in form.required_support %}
+              <div class="form-check">
+                {{ choice.tag }}
+                <label class="form-check-label" for="{{ choice.id_for_label }}">{{ choice.choice_label }}</label>
+              </div>
+            {% endfor %}
+          </div>
+          <div id="{{ form.required_support.auto_id }}_helptext" class="form-text">{{ form.required_support.help_text }}</div>
+          {% if form.required_support.errors %}
+            <div id="{{ form.required_support.auto_id }}_error" class="invalid-feedback">
+              {% for error in form.required_support.errors %}<div>{{ error }}</div>{% endfor %}
+            </div>
+          {% endif %}
+        </fieldset>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
           <a class="back-link" href="{% url 'ideas:home' %}">{% translate "Back to ideas" %}</a>
