@@ -2,7 +2,7 @@
 
 ## Why
 
-US030 (#101) asks students to state their project's development stage and support needs so other users can understand where help is needed. T69 adds the data model, and T70 connects that data to the existing creation/edit forms and project detail page.
+US030 (#101) asks students to state their project's development stage and support needs so other users can understand where help is needed. T69 (#122) adds the data model, and T70 (#123) connects that data to the existing creation/edit forms and project detail page.
 
 ## What Changes
 
@@ -49,4 +49,4 @@ None.
 - `ideas/tests.py`: cover storage, selection validation, create/edit persistence, permissions, detail badges, and empty/legacy data.
 - No dependency on the unmerged T77/T78 branch and no new runtime package.
 
-Refs #101 (US030). Covers T69 and T70 together on `T69-T70-project-stage-support`. Confirm the actual task issue numbers before writing the PR closing references.
+Refs #101 (US030), #122 (T69), and #123 (T70). Covers both tasks together on `T69-T70-project-stage-support`; the task issue numbers have been confirmed by the user.

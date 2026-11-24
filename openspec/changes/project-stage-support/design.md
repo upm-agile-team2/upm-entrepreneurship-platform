@@ -80,9 +80,9 @@ Deployment instruction to include in the PR: run `python manage.py migrate` to a
 
 Reverting this feature's schema migration drops the two new fields and their contents; retain a backup if their values need preserving. No migration or database mutation is performed while writing this proposal.
 
-## Open Questions
+## Issue References
 
-- Confirm the actual GitHub issue numbers for T69 and T70 before preparing PR closing references. US030 (#101) is the known source; do not guess task issue numbers from an older task list.
+- The user confirmed T69 is #122 and T70 is #123. US030 (#101) is the parent story. The PR should close the two task issues and reference the parent story.
 
 ## Planning Validation Baseline
 

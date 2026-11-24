@@ -1,6 +1,6 @@
 # Tasks
 
-Source: US030 (#101). T69 covers model/storage work and T70 covers the shared editor and detail-page badges. The option catalog, multiple support selection, and optional fields were confirmed by the user before implementation. Checkboxes record verified progress.
+Source: US030 (#101). T69 (#122) covers model/storage work and T70 (#123) covers the shared editor and detail-page badges. The option catalog, multiple support selection, and optional fields were confirmed by the user before implementation. Checkboxes record verified progress.
 
 ## 1. T69: Data model and existing projects
 
@@ -28,6 +28,6 @@ Source: US030 (#101). T69 covers model/storage work and T70 covers the shared ed
 
 ## Workflow follow-up
 
-- Prepare one PR from `T69-T70-project-stage-support` to `main`. Verify the actual T69/T70 issue numbers before adding closing keywords; reference US030 (#101) without guessing task IDs.
+- Prepare one PR from `T69-T70-project-stage-support` to `main`, using `Closes #122`, `Closes #123`, and `Refs #101` for the user-confirmed task and parent-story references.
 - Request review and move the task issues to In Review according to the README workflow.
 - Archive this change after implementation, verification, and the team's required acceptance steps are complete.
