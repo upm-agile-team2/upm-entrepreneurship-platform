@@ -18,7 +18,15 @@ from .management.commands.seed_demo_ideas import (
     DEMO_STUDENTS,
     demo_email,
 )
-from .models import Category, Feedback, Idea, Notification, Reply
+from .models import (
+    Category,
+    Collaborator,
+    CollaboratorRequest,
+    Feedback,
+    Idea,
+    Notification,
+    Reply,
+)
 
 User = get_user_model()
 
@@ -294,6 +302,372 @@ class IdeaModelTests(TestCase):
         )
         with self.assertRaises(ProtectedError):
             category.delete()
+
+
+class CollaboratorModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("collaboration-owner@example.com")
+        cls.student = create_student("collaboration-student@example.com")
+        cls.idea = Idea.objects.create(
+            title="Campus bike sharing",
+            description="Share bikes between faculties.",
+            owner=cls.owner,
+        )
+
+    def test_membership_is_stored_with_idea_student_and_timestamp(self):
+        before = timezone.now()
+        membership = Collaborator(idea=self.idea, collaborator=self.student)
+
+        membership.full_clean()
+        membership.save()
+        membership.refresh_from_db()
+
+        self.assertIsNotNone(membership.pk)
+        self.assertEqual(membership.idea, self.idea)
+        self.assertEqual(membership.collaborator, self.student)
+        self.assertGreaterEqual(membership.timestamp, before)
+        self.assertLessEqual(membership.timestamp, timezone.now())
+
+    def test_membership_can_be_queried_from_project_and_student(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.student
+        )
+
+        self.assertEqual(list(self.idea.collaborators.all()), [self.student])
+        self.assertEqual(list(self.student.collaborating_ideas.all()), [self.idea])
+        self.assertEqual(list(self.idea.collaborator_memberships.all()), [membership])
+        self.assertEqual(list(self.student.idea_collaborations.all()), [membership])
+
+    def test_duplicate_membership_fails_model_validation(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.student
+        )
+        duplicate = Collaborator(idea=self.idea, collaborator=self.student)
+
+        with self.assertRaises(ValidationError):
+            duplicate.full_clean()
+
+        self.assertEqual(list(Collaborator.objects.all()), [membership])
+
+    def test_database_rejects_duplicate_membership_without_model_validation(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.student
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Collaborator.objects.create(idea=self.idea, collaborator=self.student)
+
+        self.assertEqual(list(Collaborator.objects.all()), [membership])
+
+    def test_investor_cannot_be_validated_as_a_collaborator(self):
+        investor = User.objects.create_user(
+            email="collaboration-investor@example.com",
+            password="A-valid-password-123!",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        membership = Collaborator(idea=self.idea, collaborator=investor)
+
+        with self.assertRaises(ValidationError) as caught:
+            membership.full_clean()
+
+        self.assertIn("collaborator", caught.exception.message_dict)
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_project_owner_cannot_be_validated_as_a_collaborator(self):
+        membership = Collaborator(idea=self.idea, collaborator=self.owner)
+
+        with self.assertRaises(ValidationError) as caught:
+            membership.full_clean()
+
+        self.assertIn("collaborator", caught.exception.message_dict)
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_missing_foreign_keys_produce_validation_errors(self):
+        with self.assertRaises(ValidationError) as caught:
+            Collaborator().full_clean()
+
+        self.assertIn("idea", caught.exception.message_dict)
+        self.assertIn("collaborator", caught.exception.message_dict)
+
+    def test_nonexistent_foreign_keys_produce_validation_errors(self):
+        missing_id = max(self.idea.pk, self.owner.pk, self.student.pk) + 100
+        cases = (
+            (Collaborator(idea_id=missing_id, collaborator=self.student), "idea"),
+            (Collaborator(idea=self.idea, collaborator_id=missing_id), "collaborator"),
+        )
+
+        for membership, field in cases:
+            with self.subTest(field=field):
+                with self.assertRaises(ValidationError) as caught:
+                    membership.full_clean()
+                self.assertIn(field, caught.exception.message_dict)
+
+    def test_different_project_or_student_can_have_separate_memberships(self):
+        other_student = create_student("another-collaborator@example.com")
+        other_idea = Idea.objects.create(
+            title="Study planner",
+            description="Plan exams together.",
+            owner=self.owner,
+        )
+        pairs = (
+            (self.idea, self.student),
+            (self.idea, other_student),
+            (other_idea, self.student),
+        )
+
+        for idea, student in pairs:
+            membership = Collaborator(idea=idea, collaborator=student)
+            membership.full_clean()
+            membership.save()
+
+        self.assertEqual(Collaborator.objects.count(), 3)
+        self.assertCountEqual(
+            self.idea.collaborators.all(), [self.student, other_student]
+        )
+        self.assertCountEqual(
+            self.student.collaborating_ideas.all(), [self.idea, other_idea]
+        )
+
+
+class CollaboratorRequestModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("request-owner@example.com")
+        cls.receiver = create_student("request-receiver@example.com")
+        cls.other_student = create_student("request-other-student@example.com")
+        cls.investor = User.objects.create_user(
+            email="request-investor@example.com",
+            password="A-valid-password-123!",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        cls.idea = Idea.objects.create(
+            title="Campus bike sharing",
+            description="Share bikes between faculties.",
+            owner=cls.owner,
+        )
+
+    def make_request(self, **overrides):
+        fields = {
+            "idea": self.idea,
+            "sender": self.owner,
+            "receiver": self.receiver,
+        }
+        fields.update(overrides)
+        return CollaboratorRequest(**fields)
+
+    def test_request_is_stored_with_participants_timestamp_and_pending_status(self):
+        before = timezone.now()
+        invitation = self.make_request()
+
+        invitation.full_clean()
+        invitation.save()
+        invitation.refresh_from_db()
+
+        self.assertIsNotNone(invitation.pk)
+        self.assertEqual(invitation.idea, self.idea)
+        self.assertEqual(invitation.sender, self.owner)
+        self.assertEqual(invitation.receiver, self.receiver)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.PENDING)
+        self.assertGreaterEqual(invitation.timestamp, before)
+        self.assertLessEqual(invitation.timestamp, timezone.now())
+
+    def test_request_can_be_queried_from_idea_sender_and_receiver(self):
+        invitation = self.make_request()
+        invitation.save()
+
+        self.assertEqual(list(self.idea.collaborator_requests.all()), [invitation])
+        self.assertEqual(list(self.owner.sent_collaborator_requests.all()), [invitation])
+        self.assertEqual(
+            list(self.receiver.received_collaborator_requests.all()), [invitation]
+        )
+        self.assertFalse(self.other_student.received_collaborator_requests.exists())
+        self.assertFalse(self.other_student.sent_collaborator_requests.exists())
+
+    def test_supported_statuses_persist_without_automatically_adding_a_member(self):
+        for status in CollaboratorRequest.Status.values:
+            with self.subTest(status=status):
+                idea = Idea.objects.create(
+                    title=f"Project with {status} request",
+                    description="A project seeking collaborators.",
+                    owner=self.owner,
+                )
+                invitation = self.make_request(idea=idea, status=status)
+                invitation.full_clean()
+                invitation.save()
+                invitation.refresh_from_db()
+
+                self.assertEqual(invitation.status, status)
+                self.assertFalse(idea.collaborators.exists())
+                self.assertFalse(Collaborator.objects.filter(idea=idea).exists())
+
+    def test_invalid_status_fails_model_validation(self):
+        invitation = self.make_request(status="unknown")
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("status", caught.exception.message_dict)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_database_rejects_invalid_status_without_model_validation(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make_request(status="unknown").save()
+
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_student_who_does_not_own_the_project_cannot_be_the_sender(self):
+        invitation = self.make_request(sender=self.other_student)
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("sender", caught.exception.message_dict)
+
+    def test_investor_cannot_be_sender_even_if_they_own_the_idea(self):
+        idea = Idea.objects.create(
+            title="Invalid investor-owned project",
+            description="An intentionally invalid ownership fixture.",
+            owner=self.investor,
+        )
+        invitation = self.make_request(idea=idea, sender=self.investor)
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("sender", caught.exception.message_dict)
+
+    def test_investor_cannot_be_the_receiver(self):
+        invitation = self.make_request(receiver=self.investor)
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("receiver", caught.exception.message_dict)
+
+    def test_self_invitation_fails_model_validation(self):
+        invitation = self.make_request(receiver=self.owner)
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("receiver", caught.exception.message_dict)
+
+    def test_database_rejects_self_invitation_without_model_validation(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make_request(receiver=self.owner).save()
+
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_missing_foreign_keys_produce_validation_errors(self):
+        with self.assertRaises(ValidationError) as caught:
+            CollaboratorRequest().full_clean()
+
+        for field in ("idea", "sender", "receiver"):
+            self.assertIn(field, caught.exception.message_dict)
+
+    def test_nonexistent_foreign_keys_produce_validation_errors(self):
+        missing_id = max(self.idea.pk, self.investor.pk) + 100
+        for field in ("idea", "sender", "receiver"):
+            with self.subTest(field=field):
+                invitation = self.make_request()
+                setattr(invitation, f"{field}_id", missing_id)
+
+                with self.assertRaises(ValidationError) as caught:
+                    invitation.full_clean()
+
+                self.assertIn(field, caught.exception.message_dict)
+
+    def test_duplicate_request_is_rejected_for_every_existing_status(self):
+        for status in CollaboratorRequest.Status.values:
+            with self.subTest(status=status):
+                idea = Idea.objects.create(
+                    title=f"Project with {status} invitation",
+                    description="A project seeking collaborators.",
+                    owner=self.owner,
+                )
+                original = self.make_request(idea=idea, status=status)
+                original.save()
+                duplicate = self.make_request(idea=idea)
+
+                with self.assertRaises(ValidationError):
+                    duplicate.full_clean()
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    duplicate.save()
+
+                original.refresh_from_db()
+                self.assertEqual(original.status, status)
+                self.assertEqual(list(idea.collaborator_requests.all()), [original])
+
+    def test_different_project_or_receiver_can_have_separate_requests(self):
+        other_idea = Idea.objects.create(
+            title="Study planner",
+            description="Plan exams together.",
+            owner=self.owner,
+        )
+        pairs = (
+            (self.idea, self.receiver),
+            (self.idea, self.other_student),
+            (other_idea, self.receiver),
+        )
+
+        for idea, receiver in pairs:
+            invitation = self.make_request(idea=idea, receiver=receiver)
+            invitation.full_clean()
+            invitation.save()
+
+        self.assertEqual(CollaboratorRequest.objects.count(), 3)
+        self.assertEqual(self.receiver.received_collaborator_requests.count(), 2)
+        self.assertEqual(self.other_student.received_collaborator_requests.count(), 1)
+
+    def test_deleting_project_removes_memberships_and_requests_but_keeps_users(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.receiver
+        )
+        invitation = self.make_request()
+        invitation.save()
+
+        self.idea.delete()
+
+        self.assertFalse(Collaborator.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(CollaboratorRequest.objects.filter(pk=invitation.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.owner.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.receiver.pk).exists())
+
+    def test_deleting_receiver_removes_their_membership_and_request_only(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.receiver
+        )
+        invitation = self.make_request()
+        invitation.save()
+        other_invitation = self.make_request(receiver=self.other_student)
+        other_invitation.save()
+
+        self.receiver.delete()
+
+        self.assertFalse(Collaborator.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(CollaboratorRequest.objects.filter(pk=invitation.pk).exists())
+        self.assertTrue(Idea.objects.filter(pk=self.idea.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.owner.pk).exists())
+        self.assertTrue(
+            CollaboratorRequest.objects.filter(pk=other_invitation.pk).exists()
+        )
+
+    def test_deleting_sender_removes_owned_project_and_its_collaboration_records(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.receiver
+        )
+        invitation = self.make_request()
+        invitation.save()
+
+        self.owner.delete()
+
+        self.assertFalse(Idea.objects.filter(pk=self.idea.pk).exists())
+        self.assertFalse(Collaborator.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(CollaboratorRequest.objects.filter(pk=invitation.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.receiver.pk).exists())
 
 
 class FeedbackModelTests(TestCase):
