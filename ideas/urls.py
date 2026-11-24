@@ -16,6 +16,11 @@ urlpatterns = [
         name="feedback-status",
     ),
     path("ideas/<int:idea_id>/edit/", views.edit_idea, name="edit"),
+    path(
+        "students/<int:student_id>/collaborator-requests/",
+        views.send_collaborator_request,
+        name="send_collaborator_request",
+    ),
     path("notifications/", views.notifications, name="notifications"),
     path(
         "notifications/read-all/",

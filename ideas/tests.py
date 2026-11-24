@@ -1,7 +1,9 @@
 from io import StringIO
 import re
+from unittest.mock import patch
 
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
 from django.core.management import CommandError, call_command
 from django.db import IntegrityError, transaction
@@ -10,7 +12,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .forms import IdeaForm
+from .forms import CollaboratorRequestForm, IdeaForm
 from .management.commands.seed_demo_ideas import (
     DEMO_AUTHOR_KEY_PREFIX,
     DEMO_IDEA_KEY_PREFIX,
@@ -730,6 +732,479 @@ class FeedbackModelTests(TestCase):
         self.idea.delete()
 
         self.assertFalse(Feedback.objects.filter(pk=feedback.pk).exists())
+
+class CollaboratorRequestFormTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("request-form-owner@example.com")
+        cls.other_student = create_student("request-form-other@example.com")
+        cls.no_projects_student = create_student("request-form-no-projects@example.com")
+        cls.first_idea = Idea.objects.create(
+            title="Zebra project",
+            description="A project seeking collaborators.",
+            owner=cls.owner,
+        )
+        cls.second_idea = Idea.objects.create(
+            title="Alpha project",
+            description="Another project seeking collaborators.",
+            owner=cls.owner,
+        )
+        cls.foreign_idea = Idea.objects.create(
+            title="Another student's project",
+            description="A project owned by somebody else.",
+            owner=cls.other_student,
+        )
+
+    def test_selector_contains_only_owners_projects_in_stable_order(self):
+        form = CollaboratorRequestForm(owner=self.owner)
+
+        self.assertEqual(
+            list(form.fields["idea"].queryset), [self.second_idea, self.first_idea]
+        )
+
+    def test_valid_selection_returns_the_idea_without_creating_a_request(self):
+        form = CollaboratorRequestForm(
+            {"idea": str(self.first_idea.pk)}, owner=self.owner
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["idea"], self.first_idea)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_missing_or_empty_project_shows_required_error(self):
+        for data in ({}, {"idea": ""}, {"idea": None}):
+            with self.subTest(data=data):
+                form = CollaboratorRequestForm(data, owner=self.owner)
+
+                self.assertFalse(form.is_valid())
+                self.assertEqual(
+                    form.errors["idea"], ["Please select one of your published projects."]
+                )
+
+    def test_malformed_or_nonexistent_project_shows_invalid_choice_error(self):
+        missing_id = self.foreign_idea.pk + 100
+        for value in ("not-an-id", "-1", str(missing_id), "9" * 100):
+            with self.subTest(value=value):
+                form = CollaboratorRequestForm({"idea": value}, owner=self.owner)
+
+                self.assertFalse(form.is_valid())
+                self.assertEqual(
+                    form.errors["idea"], ["Select one of your own published projects."]
+                )
+
+    def test_posted_owner_cannot_make_another_students_project_selectable(self):
+        form = CollaboratorRequestForm(
+            {"idea": self.foreign_idea.pk, "owner": self.other_student.pk},
+            owner=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("idea", form.errors)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_student_without_projects_has_no_valid_selection(self):
+        form = CollaboratorRequestForm(
+            {"idea": self.first_idea.pk}, owner=self.no_projects_student
+        )
+
+        self.assertFalse(form.fields["idea"].queryset.exists())
+        self.assertFalse(form.is_valid())
+        self.assertIn("idea", form.errors)
+
+    def test_investor_cannot_select_an_idea_even_with_invalid_ownership_data(self):
+        investor = User.objects.create_user(
+            email="request-form-investor@example.com",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        idea = Idea.objects.create(
+            title="Invalid investor-owned project",
+            description="An intentionally invalid ownership fixture.",
+            owner=investor,
+        )
+        form = CollaboratorRequestForm({"idea": idea.pk}, owner=investor)
+
+        self.assertFalse(form.fields["idea"].queryset.exists())
+        self.assertFalse(form.is_valid())
+        self.assertIn("idea", form.errors)
+
+    def test_anonymous_user_has_no_valid_selection(self):
+        form = CollaboratorRequestForm(
+            {"idea": self.first_idea.pk}, owner=AnonymousUser()
+        )
+
+        self.assertFalse(form.fields["idea"].queryset.exists())
+        self.assertFalse(form.is_valid())
+        self.assertIn("idea", form.errors)
+
+
+class SendCollaboratorRequestTests(TestCase):
+    duplicate_message = (
+        "You have already sent a collaborator request to this student for this project."
+    )
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("send-request-owner@example.com")
+        cls.receiver = create_student("send-request-receiver@example.com")
+        cls.other_student = create_student("send-request-other@example.com")
+        cls.investor = User.objects.create_user(
+            email="send-request-investor@example.com",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        cls.inactive = User.objects.create_user(
+            email="send-request-inactive@example.com",
+            name="Inactive Student",
+            role=User.Role.STUDENT,
+            is_active=False,
+        )
+        cls.idea = Idea.objects.create(
+            title="Campus collaboration project",
+            description="A project seeking collaborators.",
+            owner=cls.owner,
+        )
+        cls.foreign_idea = Idea.objects.create(
+            title="Another owner's project",
+            description="A project owned by somebody else.",
+            owner=cls.other_student,
+        )
+
+    def setUp(self):
+        self.url = reverse("ideas:send_collaborator_request", args=[self.receiver.pk])
+        self.profile_url = reverse(
+            "accounts:collaborator_profile", args=[self.receiver.pk]
+        )
+        self.client.force_login(self.owner)
+
+    def test_valid_request_is_saved_for_receiver_and_confirms_success(self):
+        before = timezone.now()
+
+        response = self.client.post(self.url, {"idea": self.idea.pk}, follow=True)
+
+        self.assertEqual(response.redirect_chain, [(self.profile_url, 302)])
+        self.assertContains(response, "Your collaborator request has been sent.")
+        invitation = CollaboratorRequest.objects.get()
+        self.assertEqual(invitation.idea, self.idea)
+        self.assertEqual(invitation.sender, self.owner)
+        self.assertEqual(invitation.receiver, self.receiver)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.PENDING)
+        self.assertGreaterEqual(invitation.timestamp, before)
+        self.assertEqual(
+            list(self.receiver.received_collaborator_requests.all()), [invitation]
+        )
+        self.assertFalse(Collaborator.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_missing_project_returns_bound_form_error_without_saving(self):
+        response = self.client.post(self.url, {})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["student"], self.receiver)
+        form = response.context["collaborator_request_form"]
+        self.assertTrue(form.is_bound)
+        self.assertIn("idea", form.errors)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_malformed_empty_or_nonexistent_project_is_rejected(self):
+        for value in ("", "not-an-id", "-1", "999999", "9" * 100):
+            with self.subTest(value=value):
+                response = self.client.post(self.url, {"idea": value})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("idea", response.context["collaborator_request_form"].errors)
+                self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_another_owners_project_is_rejected(self):
+        response = self.client.post(self.url, {"idea": self.foreign_idea.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("idea", response.context["collaborator_request_form"].errors)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_anonymous_sender_is_asked_to_sign_in(self):
+        self.client.logout()
+
+        self.assertRedirects(
+            self.client.post(self.url, {"idea": self.idea.pk}),
+            f"{reverse('accounts:login')}?next={self.url}",
+        )
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_investor_cannot_send_a_request(self):
+        self.client.force_login(self.investor)
+
+        response = self.client.post(self.url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_self_invitation_is_rejected(self):
+        url = reverse("ideas:send_collaborator_request", args=[self.owner.pk])
+
+        self.assertEqual(self.client.post(url, {"idea": self.idea.pk}).status_code, 403)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_nonstudent_inactive_and_missing_receivers_are_not_found(self):
+        for student_id in (self.investor.pk, self.inactive.pk, self.inactive.pk + 100):
+            with self.subTest(student_id=student_id):
+                url = reverse("ideas:send_collaborator_request", args=[student_id])
+                response = self.client.post(url, {"idea": self.idea.pk})
+                self.assertEqual(response.status_code, 404)
+                self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_student_without_projects_cannot_send_using_someone_elses_project(self):
+        self.client.force_login(self.receiver)
+        url = reverse("ideas:send_collaborator_request", args=[self.other_student.pk])
+
+        response = self.client.post(url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["has_owned_ideas"])
+        self.assertIn("idea", response.context["collaborator_request_form"].errors)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_non_post_methods_do_not_create_records(self):
+        for method in ("GET", "PUT", "PATCH", "DELETE"):
+            with self.subTest(method=method):
+                self.assertEqual(self.client.generic(method, self.url).status_code, 405)
+
+        self.assertFalse(CollaboratorRequest.objects.exists())
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_request_requires_a_csrf_token(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.owner)
+
+        response = csrf_client.post(self.url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_request_with_a_valid_csrf_token_is_accepted(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.owner)
+        csrf_client.get(self.profile_url)
+        token = csrf_client.cookies["csrftoken"].value
+
+        response = csrf_client.post(
+            self.url, {"idea": self.idea.pk}, HTTP_X_CSRFTOKEN=token
+        )
+
+        self.assertRedirects(response, self.profile_url)
+        self.assertEqual(CollaboratorRequest.objects.count(), 1)
+
+    def test_extra_identity_and_status_fields_cannot_override_server_values(self):
+        response = self.client.post(self.url, {
+            "idea": self.idea.pk,
+            "sender": self.investor.pk,
+            "receiver": self.owner.pk,
+            "status": CollaboratorRequest.Status.ACCEPTED,
+        })
+
+        self.assertRedirects(response, self.profile_url)
+        invitation = CollaboratorRequest.objects.get()
+        self.assertEqual(invitation.sender, self.owner)
+        self.assertEqual(invitation.receiver, self.receiver)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.PENDING)
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_duplicate_requests_preserve_original_status_and_timestamp(self):
+        for status in CollaboratorRequest.Status.values:
+            with self.subTest(status=status):
+                idea = Idea.objects.create(
+                    title=f"Project with {status} request",
+                    description="A project seeking collaborators.",
+                    owner=self.owner,
+                )
+                original = CollaboratorRequest.objects.create(
+                    idea=idea, sender=self.owner, receiver=self.receiver, status=status
+                )
+                original_timestamp = original.timestamp
+
+                response = self.client.post(self.url, {"idea": idea.pk})
+
+                self.assertEqual(response.status_code, 200)
+                form = response.context["collaborator_request_form"]
+                self.assertIn(self.duplicate_message, form.non_field_errors())
+                self.assertEqual(form["idea"].value(), str(idea.pk))
+                self.assertEqual(list(idea.collaborator_requests.all()), [original])
+                original.refresh_from_db()
+                self.assertEqual(original.status, status)
+                self.assertEqual(original.timestamp, original_timestamp)
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_same_receiver_can_be_invited_for_different_owned_projects(self):
+        second_idea = Idea.objects.create(
+            title="Another owned project",
+            description="A different project seeking collaborators.",
+            owner=self.owner,
+        )
+
+        for idea in (self.idea, second_idea):
+            self.assertRedirects(
+                self.client.post(self.url, {"idea": idea.pk}), self.profile_url
+            )
+
+        self.assertEqual(self.receiver.received_collaborator_requests.count(), 2)
+
+    def test_same_project_can_have_requests_for_different_receivers(self):
+        for receiver in (self.receiver, self.other_student):
+            url = reverse("ideas:send_collaborator_request", args=[receiver.pk])
+            response = self.client.post(url, {"idea": self.idea.pk})
+            self.assertRedirects(
+                response, reverse("accounts:collaborator_profile", args=[receiver.pk])
+            )
+
+        self.assertEqual(self.idea.collaborator_requests.count(), 2)
+
+    def test_concurrent_winner_result_preserves_the_existing_request(self):
+        winners = []
+
+        def another_submission_won(*, idea, receiver, defaults):
+            invitation = CollaboratorRequest.objects.create(
+                idea=idea,
+                receiver=receiver,
+                sender=defaults["sender"],
+                status=CollaboratorRequest.Status.REJECTED,
+            )
+            winners.append(invitation)
+            return invitation, False
+
+        with patch(
+            "ideas.views.CollaboratorRequest.objects.get_or_create",
+            side_effect=another_submission_won,
+        ):
+            response = self.client.post(self.url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            self.duplicate_message,
+            response.context["collaborator_request_form"].non_field_errors(),
+        )
+        invitation = CollaboratorRequest.objects.get()
+        self.assertEqual(invitation.pk, winners[0].pk)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.REJECTED)
+        self.assertEqual(invitation.timestamp, winners[0].timestamp)
+
+    def test_model_validation_errors_are_returned_without_saving(self):
+        with patch(
+            "ideas.views.CollaboratorRequest.full_clean",
+            side_effect=ValidationError({"sender": "The sender is no longer eligible."}),
+        ):
+            response = self.client.post(self.url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 200)
+        form = response.context["collaborator_request_form"]
+        self.assertIn("The sender is no longer eligible.", form.non_field_errors())
+        self.assertEqual(form["idea"].value(), str(self.idea.pk))
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+
+class CollaboratorRequestWorkflowTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("request-workflow-owner@example.com")
+        cls.receiver = create_student("request-workflow-receiver@example.com")
+        cls.idea = Idea.objects.create(
+            title="Workflow campus project",
+            description="A project seeking collaborators.",
+            owner=cls.owner,
+        )
+        cls.foreign_idea = Idea.objects.create(
+            title="Receiver's own project",
+            description="A project the sender does not own.",
+            owner=cls.receiver,
+        )
+        # Directory entries require a saved profile.
+        from accounts.models import StudentProfile
+
+        StudentProfile.objects.create(user=cls.receiver, bio="I build student tools.")
+
+    def setUp(self):
+        self.client = Client(enforce_csrf_checks=True)
+        self.client.force_login(self.owner)
+        self.profile_url = reverse(
+            "accounts:collaborator_profile", args=[self.receiver.pk]
+        )
+
+    def open_request_form(self):
+        directory = self.client.get(reverse("accounts:student_discovery"))
+        self.assertContains(directory, f'href="{self.profile_url}"')
+        response = self.client.get(self.profile_url)
+        match = re.search(
+            r'<form\b[^>]*id="collaborator-request-form"[^>]*>.*?</form>',
+            response.content.decode(),
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        html = match.group(0)
+        action = re.search(r'\baction="([^"]+)"', html).group(1)
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', html).group(1)
+        return action, token
+
+    def test_owner_submits_the_rendered_form_and_receiver_has_the_pending_request(self):
+        action, token = self.open_request_form()
+
+        response = self.client.post(action, {
+            "idea": self.idea.pk, "csrfmiddlewaretoken": token,
+        }, follow=True)
+
+        self.assertEqual(response.redirect_chain, [(self.profile_url, 302)])
+        self.assertContains(response, "Your collaborator request has been sent.")
+        invitation = self.receiver.received_collaborator_requests.get()
+        self.assertEqual(invitation.idea, self.idea)
+        self.assertEqual(invitation.sender, self.owner)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.PENDING)
+        self.assertFalse(Collaborator.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_missing_selection_shows_error_and_can_be_corrected(self):
+        action, token = self.open_request_form()
+
+        invalid = self.client.post(action, {"csrfmiddlewaretoken": token})
+
+        self.assertContains(invalid, "Please select one of your published projects.")
+        self.assertContains(invalid, 'id="collaborator-request-form"')
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+        corrected = self.client.post(action, {
+            "idea": self.idea.pk, "csrfmiddlewaretoken": token,
+        }, follow=True)
+
+        self.assertContains(corrected, "Your collaborator request has been sent.")
+        self.assertEqual(CollaboratorRequest.objects.count(), 1)
+
+    def test_repeated_form_submission_shows_error_and_preserves_original_request(self):
+        action, token = self.open_request_form()
+        data = {"idea": self.idea.pk, "csrfmiddlewaretoken": token}
+        self.assertRedirects(self.client.post(action, data), self.profile_url)
+        original = CollaboratorRequest.objects.get()
+        original_timestamp = original.timestamp
+
+        duplicate = self.client.post(action, data)
+
+        self.assertContains(
+            duplicate,
+            "You have already sent a collaborator request to this student for this project.",
+        )
+        self.assertContains(duplicate, f'value="{self.idea.pk}" selected')
+        self.assertEqual(list(CollaboratorRequest.objects.all()), [original])
+        original.refresh_from_db()
+        self.assertEqual(original.status, CollaboratorRequest.Status.PENDING)
+        self.assertEqual(original.timestamp, original_timestamp)
+
+    def test_foreign_project_cannot_be_submitted_through_the_rendered_form(self):
+        action, token = self.open_request_form()
+
+        response = self.client.post(action, {
+            "idea": self.foreign_idea.pk, "csrfmiddlewaretoken": token,
+        })
+
+        self.assertContains(response, "Select one of your own published projects.")
+        self.assertContains(response, "I build student tools.")
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
 
 class IdeaFormTests(TestCase):
     def test_valid_form_without_category(self):

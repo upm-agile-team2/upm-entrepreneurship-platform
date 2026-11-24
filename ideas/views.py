@@ -1,13 +1,19 @@
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q, Prefetch
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
+from django.views.decorators.http import require_POST
 
-from .forms import FeedbackForm, IdeaForm, ReplyForm
-from .models import Category, Feedback, Idea, Notification, Reply
+from accounts.profile_display import collaborator_profile_context
+
+from .forms import CollaboratorRequestForm, FeedbackForm, IdeaForm, ReplyForm
+from .models import Category, CollaboratorRequest, Feedback, Idea, Notification, Reply
+
+User = get_user_model()
 
 
 def home(request):
@@ -71,6 +77,58 @@ def idea_detail(request, idea_id):
             "feedback_form": FeedbackForm(),
             "reply_form": None,
         },
+    )
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+@require_POST
+def send_collaborator_request(request, student_id):
+    if not request.user.is_student:
+        raise PermissionDenied
+
+    receiver = get_object_or_404(
+        User, pk=student_id, role=User.Role.STUDENT, is_active=True
+    )
+    if receiver.pk == request.user.pk:
+        raise PermissionDenied
+
+    form = CollaboratorRequestForm(request.POST, owner=request.user)
+    if form.is_valid():
+        idea = form.cleaned_data["idea"]
+        invitation = CollaboratorRequest(
+            idea=idea,
+            sender=request.user,
+            receiver=receiver,
+            status=CollaboratorRequest.Status.PENDING,
+        )
+        duplicate_message = _(
+            "You have already sent a collaborator request to this student for this project."
+        )
+        try:
+            invitation.full_clean()
+        except ValidationError as error:
+            if CollaboratorRequest.objects.filter(idea=idea, receiver=receiver).exists():
+                form.add_error(None, duplicate_message)
+            else:
+                form.add_error(None, error.messages)
+        else:
+            invitation, created = CollaboratorRequest.objects.get_or_create(
+                idea=idea,
+                receiver=receiver,
+                defaults={
+                    "sender": request.user,
+                    "status": CollaboratorRequest.Status.PENDING,
+                },
+            )
+            if created:
+                messages.success(request, _("Your collaborator request has been sent."))
+                return redirect("accounts:collaborator_profile", student_id=receiver.pk)
+            form.add_error(None, duplicate_message)
+
+    return render(
+        request,
+        "accounts/student_profile_detail.html",
+        collaborator_profile_context(request.user, receiver, form=form),
     )
 
 

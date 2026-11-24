@@ -1,4 +1,4 @@
-"""Student-profile discovery for US012."""
+"""Student-profile discovery for investors and student collaborators."""
 
 from django import forms
 from django.contrib.auth.decorators import login_required
@@ -42,7 +42,7 @@ def student_profiles(skill=None):
 @require_GET
 @login_required(login_url=reverse_lazy("accounts:login"))
 def student_discovery(request):
-    if not request.user.is_investor:
+    if not (request.user.is_investor or request.user.is_student):
         raise PermissionDenied
 
     form = StudentProfileFilterForm(request.GET or None)
@@ -57,6 +57,8 @@ def student_discovery(request):
 
     if not form.fields["skill"].queryset.exists():
         form.fields["skill"].help_text = _("No skills are available to filter yet.")
+    if request.user.is_student:
+        profiles = profiles.exclude(user_id=request.user.pk)
     profiles = list(profiles)
     return render(request, "accounts/student_discovery.html", {
         "filter_form": form,

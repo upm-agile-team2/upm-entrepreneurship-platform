@@ -13,7 +13,7 @@ from django.views.decorators.http import require_GET, require_POST, require_http
 
 from .forms import EmailAuthenticationForm, ProfileEntryFormSet, SignUpForm, StudentProfileForm
 from .models import Follow, ProfileVisit, StudentProfile
-from .profile_entries import present_entries
+from .profile_display import collaborator_profile_context, profile_display_context
 
 User = get_user_model()
 
@@ -83,29 +83,13 @@ def student_profile(request):
     )
 
 
-def _profile_display_context(student):
-    profile = (
-        StudentProfile.objects.filter(user=student)
-        .prefetch_related("skills")
-        .first()
-    )
-
-    return {
-        "student": student,
-        "profile": profile,
-        "skills": profile.skills.all() if profile else [],
-        "portfolio_projects": present_entries(profile.portfolio_projects, "project") if profile else [],
-        "experience_entries": present_entries(profile.experience, "experience") if profile else [],
-    }
-
-
 @require_GET
 @login_required(login_url=reverse_lazy("accounts:login"))
 def my_profile(request):
     if not request.user.is_student:
         raise PermissionDenied
 
-    context = _profile_display_context(request.user)
+    context = profile_display_context(request.user)
     context["is_own_profile"] = True
     context["profile_visit_count"] = request.user.profile_visits.count()
     return render(request, "accounts/student_profile_detail.html", context)
@@ -122,12 +106,32 @@ def investor_profile(request, student_id):
         pk=student_id,
     )
     ProfileVisit.objects.create(student=student, visitor=request.user)
-    context = _profile_display_context(student)
+    context = profile_display_context(student)
     context["is_own_profile"] = False
     context["is_following"] = Follow.objects.filter(
         investor=request.user, student=student
     ).exists()
     return render(request, "accounts/student_profile_detail.html", context)
+
+
+@require_GET
+@login_required(login_url=reverse_lazy("accounts:login"))
+def collaborator_profile(request, student_id):
+    if not request.user.is_student:
+        raise PermissionDenied
+
+    student = get_object_or_404(
+        User.objects.filter(role=User.Role.STUDENT, is_active=True),
+        pk=student_id,
+    )
+    if student.pk == request.user.pk:
+        return redirect("accounts:my_profile")
+
+    return render(
+        request,
+        "accounts/student_profile_detail.html",
+        collaborator_profile_context(request.user, student),
+    )
 
 
 @login_required(login_url=reverse_lazy("accounts:login"))
