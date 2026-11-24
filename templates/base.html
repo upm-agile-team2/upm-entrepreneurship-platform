@@ -39,6 +39,9 @@
               {% endif %}
               {% if user.is_student %}
                 <li class="nav-item">
+                  <a class="nav-link" href="{% url 'ideas:collaborator_requests' %}"{% if request.resolver_match.view_name == 'ideas:collaborator_requests' %} aria-current="page"{% endif %}>{% translate "Collaborator requests" %}</a>
+                </li>
+                <li class="nav-item">
                   <a class="nav-link nav-action" href="{% url 'ideas:publish' %}">{% translate "Publish an idea" %}</a>
                 </li>
                 <li class="nav-item">

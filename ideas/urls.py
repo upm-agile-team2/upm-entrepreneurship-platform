@@ -21,6 +21,16 @@ urlpatterns = [
         views.send_collaborator_request,
         name="send_collaborator_request",
     ),
+    path(
+        "collaborator-requests/",
+        views.collaborator_requests,
+        name="collaborator_requests",
+    ),
+    path(
+        "collaborator-requests/<int:request_id>/respond/",
+        views.respond_collaborator_request,
+        name="respond_collaborator_request",
+    ),
     path("notifications/", views.notifications, name="notifications"),
     path(
         "notifications/read-all/",
