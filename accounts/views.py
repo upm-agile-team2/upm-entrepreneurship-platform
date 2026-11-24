@@ -4,7 +4,8 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, LogoutView
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.validators import URLValidator
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
@@ -79,6 +80,10 @@ def student_profile(request):
         request,
         "accounts/student_profile_form.html",
         {"form": form, "profile": profile, "profile_fields": [form["bio"], form["skills"]],
+         "social_media_fields": [
+             form["instagram_url"], form["twitter_url"],
+             form["youtube_url"], form["github_url"],
+         ],
          "projects_formset": projects, "experience_formset": experience},
     )
 
@@ -90,9 +95,26 @@ def _profile_display_context(student):
         .first()
     )
 
+    social_links = []
+    if profile:
+        validate_url = URLValidator(schemes=["http", "https"])
+        for platform, label in (
+            ("instagram", "Instagram"), ("twitter", "Twitter"),
+            ("youtube", "YouTube"), ("github", "GitHub"),
+        ):
+            url = getattr(profile, f"{platform}_url")
+            if not url:
+                continue
+            try:
+                validate_url(url)
+            except ValidationError:
+                continue
+            social_links.append({"platform": platform, "label": label, "url": url})
+
     return {
         "student": student,
         "profile": profile,
+        "social_links": social_links,
         "skills": profile.skills.all() if profile else [],
         "portfolio_projects": present_entries(profile.portfolio_projects, "project") if profile else [],
         "experience_entries": present_entries(profile.experience, "experience") if profile else [],
