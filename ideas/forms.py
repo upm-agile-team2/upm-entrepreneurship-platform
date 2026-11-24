@@ -5,13 +5,24 @@ from .models import Feedback, Idea, Reply
 
 
 class IdeaForm(forms.ModelForm):
+    required_support = forms.MultipleChoiceField(
+        label=_("Required support"),
+        choices=Idea.SupportType.choices,
+        required=False,
+        widget=forms.CheckboxSelectMultiple(attrs={"class": "form-check-input"}),
+        help_text=_("Select all types of support your project needs."),
+    )
+
     class Meta:
         model = Idea
-        fields = ["title", "description", "category"]
+        fields = [
+            "title", "description", "category", "development_stage", "required_support",
+        ]
         widgets = {
             "title": forms.TextInput(attrs={"class": "form-control"}),
             "description": forms.Textarea(attrs={"class": "form-control", "rows": 6}),
             "category": forms.Select(attrs={"class": "form-select"}),
+            "development_stage": forms.Select(attrs={"class": "form-select"}),
         }
         error_messages = {
             "title": {"required": _("Please enter a title for your idea.")},
@@ -21,6 +32,9 @@ class IdeaForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["category"].empty_label = _("Select a category")
+        self.fields["development_stage"].choices = [
+            ("", _("Not specified")), *Idea.DevelopmentStage.choices,
+        ]
 
     def full_clean(self):
         super().full_clean()

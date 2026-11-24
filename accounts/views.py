@@ -79,6 +79,10 @@ def student_profile(request):
         request,
         "accounts/student_profile_form.html",
         {"form": form, "profile": profile, "profile_fields": [form["bio"], form["skills"]],
+         "social_media_fields": [
+             form["instagram_url"], form["twitter_url"],
+             form["youtube_url"], form["github_url"],
+         ],
          "projects_formset": projects, "experience_formset": experience},
     )
 

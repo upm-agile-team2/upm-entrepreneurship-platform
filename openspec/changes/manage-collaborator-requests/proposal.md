@@ -10,6 +10,7 @@ Invitations can currently be sent and saved, but students have no website entry 
 - Accept an invitation by atomically recording Accepted and creating the receiver's collaborator membership. Decline records Rejected without creating a membership. Only the addressed student may act, and only Pending requests may transition.
 - Add a Sent tab listing the current student's sent invitations and their statuses. This is an explicit addition requested in this conversation; the original GitHub tasks specify the incoming list, not a sent-history screen.
 - Add a read-only History tab showing the current receiver's Accepted and Rejected invitations. This is a further explicit user request from manual acceptance testing; handled invitations leave Received but remain visible to their receiver in History.
+- Integrate latest main's social profile links and project stage/support fields before delivery, preserving them across collaboration views and joining the two existing `ideas.0007` branches with an empty merge migration.
 - Confirm each action and remove handled requests from the pending inbox. Display accepted collaborators on the idea detail page so membership is visible without granting idea-editing rights.
 - Add endpoint, privacy, state-transition, rollback, and rendered-form workflow tests for the three US028 acceptance criteria and the session's sent-status requirement.
 
@@ -36,4 +37,4 @@ None.
 - `ideas/views.py`, `ideas/urls.py`: scoped request queries and authorized transactional decision endpoints.
 - `templates/base.html`, new request-list template, and `templates/ideas/idea_detail.html`: discoverable invitation inbox, sent list, and membership display.
 - New focused Django tests and this OpenSpec change's artifacts.
-- No migrations, external dependencies, or feedback notification schema changes.
+- One empty migration merge node joins the existing collaboration and project-stage migrations. No additional model fields, external dependencies, or feedback notification schema changes are introduced by request management.

@@ -83,6 +83,26 @@
       </div>
     {% else %}
       <div class="row g-4">
+        {% if social_links %}
+          <div class="col-12">
+            <section class="card profile-section" aria-labelledby="profile-social-title">
+              <div class="card-body">
+                <h2 id="profile-social-title" class="h4">{% translate "Social media" %}</h2>
+                <ul class="list-unstyled d-flex flex-wrap gap-3 mb-0">
+                  {% for link in social_links %}
+                    <li>
+                      <a class="btn btn-outline-primary d-inline-flex align-items-center gap-2" href="{{ link.url }}" target="_blank" rel="noopener noreferrer">
+                        {% include "accounts/includes/social_icon.html" with platform=link.platform only %}
+                        {{ link.label }}
+                        <span class="visually-hidden">({% translate "opens in a new tab" %})</span>
+                      </a>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </section>
+          </div>
+        {% endif %}
         <div class="col-12">
           <section class="card h-100 profile-section" aria-labelledby="profile-bio-title">
             <div class="card-body">

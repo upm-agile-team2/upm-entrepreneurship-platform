@@ -46,7 +46,7 @@ Add `ideas/test_collaborator_requests.py`. Test each US028 criterion plus privac
 
 ## Migration Plan
 
-No new migration. The existing `0007_add_collaborator_models` migration must be applied. Deploy with the T62–T63 changes on this branch. Rollback removes the new views/templates without deleting saved invitations or memberships.
+Run `python manage.py migrate` when deploying with the T62–T63 changes. The existing `0007_add_collaborator_models` migration supplies the collaboration schema. After synchronizing current main, `0008_merge_collaborators_and_project_stage` joins that migration with main's existing `0007_add_project_stage_support` through an empty operation list. It adds no fields or data transformations of its own. Main's accounts social-link migration is retained. Application rollback does not require deleting saved invitations or memberships.
 
 ## Implementation and Verification
 
@@ -75,9 +75,9 @@ A separate headless Chrome preview used a fresh temporary browser profile, tempo
 - `.venv/bin/python manage.py check`: passes with no issues.
 - `.venv/bin/python manage.py makemigrations --check --dry-run`: passes with no changes.
 - `openspec validate manage-collaborator-requests --strict`: passes.
-- `openspec validate --all`: all 21 items pass after the pre-submission metadata cleanup documented below. Earlier verification reported 19 passed and 2 failed because `prepare-sprint2-experiments` and `seed-demo-ideas` lacked their no-spec-change metadata.
+- `openspec validate --all`: all 24 items pass after synchronizing current main. The earlier pre-submission metadata cleanup passed 21 items; the initial baseline failed two items because their no-spec-change metadata was absent.
 - `git diff --check`: passes.
-- `.venv/bin/python manage.py test`: all 340 Django tests pass after the History addition, including the earlier model/sending work and existing account, feedback, and profile regressions.
+- `.venv/bin/python manage.py test`: all 380 Django tests pass after the latest-main integration, including both upstream features and migration-branch preservation tests. The History-stage run previously passed 340 tests.
 
 US028's View pending requests, Accept request, and Decline request criteria have automated HTTP/template coverage and local browser verification. US027's sent request can now be seen and processed by its receiver, and the sender can see its status. The README Definition of Done was reviewed: another team member's review, integrated/deployed MVP verification, comparison with the agreed UX wireframes, and Product Owner Sprint Review acceptance are still external follow-up. The implementation checklist does not claim these reviews or story acceptance have occurred.
 
@@ -92,3 +92,13 @@ The isolated headless Chrome preview was reopened using the previous fictional r
 ### Pre-submission metadata cleanup
 
 The user's submission-readiness request prompted resolving the two existing OpenSpec validation failures. Both `prepare-sprint2-experiments` and `seed-demo-ideas` explicitly declare no capability/specification changes in their proposals. Added their missing `.openspec.yaml` files with `schema: spec-driven` and `skip_specs: true`, matching that documented scope and the existing metadata convention. No application code or behavior changed in this cleanup. `openspec validate --all` now passes all 21 items, and `git diff --check` passes. The latest application test run remains all 340 tests passing; metadata-only cleanup does not require another Django run.
+
+### Latest-main integration and delivery preparation
+
+Fetched current main (`2554f2f`) over HTTPS after the configured SSH remote failed authentication. Main includes social profile links and project development-stage/support fields, plus the same two OpenSpec metadata fixes. Resolved the profile-context extraction conflict by moving main's HTTP(S)-validated social-link presentation into `accounts/profile_display.py`, shared by owner, investor, collaboration GET, and invalid-send renders. Retained main's profile editor fields, project form/details, and the collaborator model validation imports.
+
+Added `0008_merge_collaborators_and_project_stage` as an empty merge node depending on the two existing `ideas.0007` migrations. Two new migration tests upgrade from each sibling independently and preserve existing project fields, requests, and memberships. Three new HTTP/template regressions verify social links on collaboration GET/invalid POST, unsafe-link filtering, and coexistence of stage/support details with accepted collaborators. All seven focused integration/migration checks pass, and the full Django suite passes all 380 tests. System checks, migration consistency, all 24 OpenSpec items, and whitespace checks pass.
+
+The isolated temporary preview database was upgraded and verified again in Chrome at desktop and mobile widths. Collaboration profiles retained social links and the invitation form; project details retained stage/support and collaborator names without granting edit access; existing History outcomes remained visible and read-only. Screenshots were inspected. The development database was backed up outside the repository, checked with SQLite `quick_check`, and its only pending migration (the empty merge node) was applied successfully; `migrate --check` passes.
+
+Prepared a single T60–T65 PR description with closing references #113–#118 and story references #98/#99. Separate local commits preserve the sending, management, and metadata stages. Remote push and PR creation are not claimed complete: SSH returned `Permission denied (publickey)`, no HTTPS GitHub credential or API token was available, and no existing PR was found for this branch. GitHub authentication requires user action; no credentials were printed or added to the repository. External team/integrated/wireframe/PO acceptance remains pending.

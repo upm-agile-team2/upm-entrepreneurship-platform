@@ -23,6 +23,10 @@ US028 (#99), T64 (#117), T65 (#118), and the receiving portion of US027 (#98). T
 
 - [x] 5.1 Add a read-only receiver-scoped History tab showing Accepted/Rejected invitations with idea/creator details, active navigation, and an empty state. Verify history excludes Pending and other receivers' records, has no decision forms or mutations, preserves terminal-state protection, and retains accepted/declined outcomes through the rendered workflow. Pass focused tests, the full Django suite, system/migration checks, strict change validation, and whitespace checks; record browser observations and results in design.md.
 
+## 6. Integration with latest main before delivery
+
+- [x] 6.1 Merge latest main while preserving social links on owner/investor/collaboration profiles and project stage/support information. Reconcile the two existing `ideas.0007` branches with an empty merge migration; pass preservation tests upgrading from either branch, cross-feature profile/detail regressions, the full Django suite, system/migration/OpenSpec checks, and whitespace checks. Record results and prepare the final PR description without treating GitHub authentication or external acceptance as completed.
+
 ## Workflow follow-up
 
 - Include #117 and #118 in the shared final T60–T65 PR's completed task references, with story references #98 and #99. Review before closing stories.
