@@ -41,12 +41,22 @@
           {% if not notification.is_read %}aria-label="{% translate 'Unread notification' %}"{% endif %}
         >
           <span>
-            {% blocktranslate with idea_title=notification.feedback.idea.title %}
-              New feedback on "{{ idea_title }}"
-            {% endblocktranslate %}
+            {% if notification.type == "idea_published" %}
+              {% blocktranslate with idea_title=notification.idea.title %}
+                New idea published: "{{ idea_title }}"
+              {% endblocktranslate %}
+            {% elif notification.type == "feedback_reply" %}
+              {% blocktranslate with idea_title=notification.reply.feedback.idea.title %}
+                A student replied to your feedback on "{{ idea_title }}"
+              {% endblocktranslate %}
+            {% else %}
+              {% blocktranslate with idea_title=notification.feedback.idea.title %}
+                New feedback on "{{ idea_title }}"
+              {% endblocktranslate %}
+            {% endif %}
           </span>
           <small class="d-block text-muted">
-            {% if notification.feedback.author %}
+            {% if notification.type == "feedback_received" and notification.feedback.author %}
               {% blocktranslate with author=notification.feedback.author.name %}
                 From {{ author }}
               {% endblocktranslate %}
@@ -67,7 +77,7 @@
     {% empty %}
       <div class="empty-state">
         <h2>{% translate "No notifications yet" %}</h2>
-        <p>{% translate "You will see feedback notifications here." %}</p>
+        <p>{% translate "You will see idea and feedback notifications here." %}</p>
       </div>
     {% endfor %}
   </section>

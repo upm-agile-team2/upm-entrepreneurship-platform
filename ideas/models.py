@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 from django.db.models.functions import Lower
 from django.utils.translation import gettext_lazy as _
 
@@ -158,6 +159,11 @@ class Reply(models.Model):
 
 
 class Notification(models.Model):
+    class Type(models.TextChoices):
+        FEEDBACK_RECEIVED = "feedback_received", _("Feedback received")
+        IDEA_PUBLISHED = "idea_published", _("Idea published")
+        FEEDBACK_REPLY = "feedback_reply", _("Feedback reply")
+
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         verbose_name=_("recipient"),
@@ -167,14 +173,62 @@ class Notification(models.Model):
     feedback = models.ForeignKey(
         Feedback,
         verbose_name=_("feedback"),
+        null=True,
         on_delete=models.CASCADE,
         related_name="notifications",
+    )
+    idea = models.ForeignKey(
+        Idea,
+        verbose_name=_("idea"),
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    reply = models.OneToOneField(
+        Reply,
+        verbose_name=_("reply"),
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="notification",
+    )
+    type = models.CharField(
+        _("type"),
+        max_length=30,
+        choices=Type.choices,
+        default=Type.FEEDBACK_RECEIVED,
     )
     created_at = models.DateTimeField(_("created at"), auto_now_add=True)
     is_read = models.BooleanField(_("read"), default=False)
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        type="feedback_received",
+                        feedback__isnull=False,
+                        idea__isnull=True,
+                        reply__isnull=True,
+                    )
+                    | Q(
+                        type="idea_published",
+                        feedback__isnull=True,
+                        idea__isnull=False,
+                        reply__isnull=True,
+                    )
+                    | Q(
+                        type="feedback_reply",
+                        feedback__isnull=True,
+                        idea__isnull=True,
+                        reply__isnull=False,
+                    )
+                ),
+                name="ideas_notification_target_matches_type",
+            ),
+        ]
 
     def __str__(self):
-        return f"Notification for {self.recipient} about {self.feedback}"
+        return f"{self.get_type_display()} notification for {self.recipient}"
