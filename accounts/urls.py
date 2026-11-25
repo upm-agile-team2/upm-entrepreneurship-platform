@@ -4,6 +4,7 @@ from .discovery import student_discovery
 from .views import (
     AccountLoginView,
     AccountLogoutView,
+    collaborator_profile,
     follow_student,
     following,
     investor_profile,
@@ -24,6 +25,11 @@ urlpatterns = [
     path("profile/me/", my_profile, name="my_profile"),
     path("following/", following, name="following"),
     path("students/<int:student_id>/profile/", investor_profile, name="investor_profile"),
+    path(
+        "students/<int:student_id>/collaborate/",
+        collaborator_profile,
+        name="collaborator_profile",
+    ),
     path("students/<int:student_id>/follow/", follow_student, name="follow_student"),
     path("students/<int:student_id>/unfollow/", unfollow_student, name="unfollow_student"),
 ]
