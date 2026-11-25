@@ -178,7 +178,12 @@ def publish_idea(request):
     return render(
         request,
         "ideas/idea_form.html",
-        {"form": form, "heading": _("Publish an idea"), "submit_label": _("Publish")},
+        {
+            "form": form,
+            "idea_fields": [form[name] for name in ("title", "description", "category", "development_stage")],
+            "heading": _("Publish an idea"),
+            "submit_label": _("Publish"),
+        },
     )
 
 
@@ -202,7 +207,12 @@ def edit_idea(request, idea_id):
     return render(
         request,
         "ideas/idea_form.html",
-        {"form": form, "heading": _("Edit idea"), "submit_label": _("Save changes")},
+        {
+            "form": form,
+            "idea_fields": [form[name] for name in ("title", "description", "category", "development_stage")],
+            "heading": _("Edit idea"),
+            "submit_label": _("Save changes"),
+        },
     )
 
 

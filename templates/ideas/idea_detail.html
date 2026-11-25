@@ -25,6 +25,24 @@
       {% endif %}
       <time datetime="{{ idea.published_at|date:'c' }}">{{ idea.published_at|date:"M j, Y" }}</time>
     </div>
+    {% with support_labels=idea.required_support_labels %}
+      {% if idea.development_stage or support_labels %}
+        <div id="project-needs" class="d-flex flex-column gap-3 mt-4">
+          {% if idea.development_stage %}
+            <div id="project-development-stage" class="d-flex flex-wrap align-items-center gap-2">
+              <span class="small text-body-secondary">{% translate "Development stage" %}:</span>
+              <span class="badge text-bg-primary">{{ idea.get_development_stage_display }}</span>
+            </div>
+          {% endif %}
+          {% if support_labels %}
+            <div id="project-required-support" class="d-flex flex-wrap align-items-center gap-2">
+              <span class="small text-body-secondary">{% translate "Support needed" %}:</span>
+              {% for label in support_labels %}<span class="badge text-bg-secondary">{{ label }}</span>{% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+    {% endwith %}
     </header>
     <div class="detail-description">
       <p class="mb-0">{{ idea.description|linebreaksbr }}</p>
