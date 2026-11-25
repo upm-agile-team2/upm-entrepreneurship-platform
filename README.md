@@ -84,6 +84,8 @@ Every new change starts with a proposal linked to its issue. From Claude Code:
 | Testing and CI | Django tests + GitHub Actions |
 | Deployment | Render (free tier) |
 
+Profile pictures are uploaded media, separate from static assets. Local development stores them under `MEDIA_ROOT` and serves them at `MEDIA_URL` while `DEBUG` is enabled. Before relying on uploaded pictures in deployment, configure Django's media storage to use durable persistent storage; this repository's local filesystem default does not guarantee upload durability on Render.
+
 ## Getting started
 
 Requirements: Python 3.12 and Git.

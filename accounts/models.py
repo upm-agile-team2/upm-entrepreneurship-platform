@@ -6,6 +6,7 @@ from django.core.validators import URLValidator
 from django.db import models
 from django.db.models import F, Q
 from django.db.models.functions import Lower
+from django.templatetags.static import static
 from django.utils.translation import gettext_lazy as _
 
 
@@ -46,6 +47,7 @@ class User(AbstractUser):
     name = models.CharField(_("name"), max_length=150)
     email = models.EmailField(_("email address"), unique=True)
     role = models.CharField(_("role"), max_length=20, choices=Role.choices)
+    avatar = models.ImageField(_("avatar"), upload_to="avatars/", blank=True)
     demo_key = models.CharField(
         _("demo key"), max_length=100, unique=True, null=True, blank=True, editable=False
     )
@@ -78,6 +80,12 @@ class User(AbstractUser):
     @property
     def is_investor(self):
         return self.role == self.Role.INVESTOR
+
+    @property
+    def avatar_url(self):
+        if self.avatar:
+            return self.avatar.url
+        return static("accounts/default-avatar.svg")
 
 
 class Skill(models.Model):

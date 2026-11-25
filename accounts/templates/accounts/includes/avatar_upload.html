@@ -1,0 +1,23 @@
+{% load i18n %}
+<section class="avatar-upload-panel" aria-labelledby="avatar-upload-title">
+  <div class="d-flex align-items-center gap-3 mb-3">
+    {% include "accounts/includes/avatar.html" with avatar_user=avatar_user avatar_class="profile-avatar profile-avatar--card" avatar_size=56 only %}
+    <div>
+      <h2 id="avatar-upload-title" class="h5 mb-1">{% translate "Profile picture" %}</h2>
+      <p class="form-text mb-0">{% translate "Choose an image up to 5 MB." %}</p>
+    </div>
+  </div>
+  <form method="post" action="{% url 'accounts:upload_avatar' %}" enctype="multipart/form-data">
+    {% csrf_token %}
+    <label class="form-label" for="profile-avatar-file">{% translate "Upload a new picture" %}</label>
+    <input
+      class="form-control"
+      id="profile-avatar-file"
+      type="file"
+      name="avatar"
+      accept="image/*"
+      required
+    >
+    <button type="submit" class="btn btn-outline-secondary mt-3">{% translate "Save picture" %}</button>
+  </form>
+</section>

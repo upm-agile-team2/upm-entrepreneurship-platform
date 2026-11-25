@@ -46,6 +46,7 @@
           <li class="col-12 col-md-6 col-xl-4">
             <article class="card h-100 student-discovery-card" aria-labelledby="student-{{ profile.user_id }}">
               <div class="card-body">
+                {% include "accounts/includes/avatar.html" with avatar_user=profile.user avatar_class="profile-avatar profile-avatar--card" avatar_size=56 only %}
                 <h3 id="student-{{ profile.user_id }}" class="student-discovery-name">
                   <a href="{% url 'accounts:investor_profile' profile.user_id %}">{{ profile.user.name }}</a>
                 </h3>

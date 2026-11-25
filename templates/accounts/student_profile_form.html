@@ -11,6 +11,7 @@
       <p>{% translate "Share your bio, skills, projects, and experience with potential investors." %}</p>
     </div>
     <div class="form-surface">
+      {% include "accounts/includes/avatar_upload.html" with avatar_user=request.user only %}
       <form method="post" novalidate>
         {% csrf_token %}
         <input type="hidden" name="profile_entries_editor" value="1">

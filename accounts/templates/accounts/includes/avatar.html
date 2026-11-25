@@ -1,0 +1,8 @@
+{% load i18n %}
+<img
+  class="{{ avatar_class }}"
+  src="{{ avatar_user.avatar_url }}"
+  width="{{ avatar_size }}"
+  height="{{ avatar_size }}"
+  alt="{% blocktranslate with name=avatar_user.name %}Profile picture of {{ name }}{% endblocktranslate %}"
+>

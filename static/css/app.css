@@ -140,6 +140,10 @@ textarea.form-control { resize: vertical; min-height: 170px; line-height: 1.7; }
 .reply-form textarea.form-control { min-height: 96px; }
 
 .profile-heading { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.profile-avatar { display: block; flex: 0 0 auto; object-fit: cover; border: 1px solid var(--app-border); border-radius: 50%; background: var(--app-canvas); }
+.profile-avatar--large { width: 112px; height: 112px; margin-bottom: 16px; }
+.profile-avatar--card { width: 56px; height: 56px; margin-bottom: 16px; }
+.avatar-upload-panel { padding: 20px; margin-bottom: 28px; border: 1px solid var(--app-border); border-radius: var(--app-radius); background: var(--app-canvas); }
 .profile-follow-action { flex: 0 0 auto; margin: 0; }
 .profile-card { border-color: var(--app-border); border-radius: var(--app-radius); background: var(--surface-card); }
 .profile-card .card-body { display: flex; flex-direction: column; padding: 24px; min-width: 0; }

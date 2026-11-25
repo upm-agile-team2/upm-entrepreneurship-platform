@@ -5,9 +5,13 @@ from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.core.validators import URLValidator
 from django.utils.translation import gettext_lazy as _
+from PIL import Image
 
 from .models import Skill, StudentProfile, User
 from .profile_entries import ENTRY_FIELDS, entry_fields, present_entry
+
+MAX_AVATAR_SIZE = 5 * 1024 * 1024
+MAX_AVATAR_DIMENSION = 4096
 
 
 class BootstrapFormMixin:
@@ -58,6 +62,37 @@ class SignUpForm(BootstrapFormMixin, UserCreationForm):
                 _("This email is already registered. Please sign in or use another address.")
             )
         return email
+
+
+class AvatarUploadForm(BootstrapFormMixin, forms.ModelForm):
+    avatar = forms.ImageField(
+        label=_("Profile picture"),
+        error_messages={"invalid_image": _("Choose a valid image file.")},
+    )
+
+    class Meta:
+        model = User
+        fields = ("avatar",)
+
+    def clean_avatar(self):
+        avatar = self.cleaned_data["avatar"]
+        if avatar.size > MAX_AVATAR_SIZE:
+            raise ValidationError(_("The image must be no larger than 5 MB."))
+
+        try:
+            avatar.seek(0)
+            with Image.open(avatar) as image:
+                width, height = image.size
+        except (Image.DecompressionBombError, OSError, ValueError):
+            raise ValidationError(_("Choose a valid image file.")) from None
+        finally:
+            avatar.seek(0)
+
+        if width > MAX_AVATAR_DIMENSION or height > MAX_AVATAR_DIMENSION:
+            raise ValidationError(
+                _("The image must not exceed 4096 pixels in width or height.")
+            )
+        return avatar
 
 
 class JSONListField(forms.JSONField):
