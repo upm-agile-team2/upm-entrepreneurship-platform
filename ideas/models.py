@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Lower
 from django.utils.translation import gettext_lazy as _
@@ -22,8 +23,32 @@ class Category(models.Model):
 
 
 class Idea(models.Model):
+    class DevelopmentStage(models.TextChoices):
+        IDEA = "idea", _("Idea")
+        PROTOTYPE = "prototype", _("Prototype")
+        MVP = "mvp", _("MVP")
+        LAUNCHED = "launched", _("Launched")
+        GROWTH = "growth", _("Growth")
+
+    class SupportType(models.TextChoices):
+        FUNDING = "funding", _("Funding")
+        TECHNICAL_SUPPORT = "technical_support", _("Technical support")
+        MENTORING = "mentoring", _("Mentoring")
+        MARKETING = "marketing", _("Marketing")
+        TEAM_MEMBERS = "team_members", _("Team members")
+
     title = models.CharField(_("title"), max_length=200)
     description = models.TextField(_("description"))
+    development_stage = models.CharField(
+        _("development stage"),
+        max_length=20,
+        choices=DevelopmentStage.choices,
+        blank=True,
+        default="",
+    )
+    required_support = models.JSONField(
+        _("required support"), blank=True, default=list
+    )
     category = models.ForeignKey(
         Category,
         verbose_name=_("category"),
@@ -45,6 +70,29 @@ class Idea(models.Model):
 
     class Meta:
         ordering = ["-published_at"]
+
+    @property
+    def required_support_labels(self):
+        values = self.required_support if isinstance(self.required_support, list) else []
+        return [label for value, label in self.SupportType.choices if value in values]
+
+    def clean(self):
+        super().clean()
+        if not isinstance(self.required_support, list):
+            raise ValidationError(
+                {"required_support": _("Support needs must be a list.")}
+            )
+        if any(
+            not isinstance(value, str) or value not in self.SupportType.values
+            for value in self.required_support
+        ):
+            raise ValidationError(
+                {"required_support": _("Select valid support types.")}
+            )
+        if len(self.required_support) != len(set(self.required_support)):
+            raise ValidationError(
+                {"required_support": _("Select each support type only once.")}
+            )
 
     def __str__(self):
         return self.title

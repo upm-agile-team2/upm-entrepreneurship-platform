@@ -151,6 +151,72 @@ class IdeaDetailPageTests(TestCase):
         )
         self.url = reverse("ideas:detail", args=[self.idea.pk])
 
+    def test_other_users_see_stage_and_support_badges(self):
+        self.idea.development_stage = "prototype"
+        self.idea.required_support = list(Idea.SupportType.values)
+        self.idea.save()
+        student = create_student("project-detail-viewer@example.com")
+        investor = User.objects.create_user(
+            email="project-needs-investor@example.com", name="Needs Investor",
+            password="Project-needs-password-123!", role=User.Role.INVESTOR,
+        )
+        for viewer in (student, investor, None):
+            with self.subTest(viewer=viewer.role if viewer else "anonymous"):
+                if viewer:
+                    self.client.force_login(viewer)
+                else:
+                    self.client.logout()
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'id="project-development-stage"')
+                self.assertContains(response, '<span class="badge text-bg-primary">Prototype</span>', html=True)
+                self.assertContains(response, 'id="project-required-support"')
+                for label in Idea.SupportType.labels:
+                    self.assertContains(response, f'<span class="badge text-bg-secondary">{label}</span>', html=True)
+                self.assertNotContains(response, "technical_support")
+                self.assertNotContains(response, "team_members")
+                self.assertNotContains(response, reverse("ideas:edit", args=[self.idea.pk]))
+
+    def test_partial_and_cleared_project_needs_hide_empty_badges(self):
+        self.client.force_login(create_student("partial-needs-viewer@example.com"))
+        for stage, support in (
+            ("mvp", []), ("", ["team_members"]), ("", []),
+        ):
+            with self.subTest(stage=stage, support=support):
+                self.idea.development_stage = stage
+                self.idea.required_support = support
+                self.idea.save()
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, self.idea.title)
+                self.assertContains(response, self.category.name)
+                if stage:
+                    self.assertContains(response, 'id="project-development-stage"')
+                    self.assertContains(response, '<span class="badge text-bg-primary">MVP</span>', html=True)
+                else:
+                    self.assertNotContains(response, 'id="project-development-stage"')
+                if support:
+                    self.assertContains(response, 'id="project-required-support"')
+                    self.assertContains(response, '<span class="badge text-bg-secondary">Team members</span>', html=True)
+                else:
+                    self.assertNotContains(response, 'id="project-required-support"')
+                if not stage and not support:
+                    self.assertNotContains(response, 'id="project-needs"')
+
+    def test_support_badges_use_known_labels_without_duplicates(self):
+        # Direct saves can bypass model validation; never display raw JSON.
+        self.idea.required_support = ["unknown", "funding", "funding", {"type": "funding"}]
+        self.idea.save()
+        response = self.client.get(self.url)
+        self.assertContains(response, '<span class="badge text-bg-secondary">Funding</span>', count=1, html=True)
+        self.assertNotContains(response, "unknown")
+
+        self.idea.required_support = {"funding": "invalid list shape"}
+        self.idea.save()
+        response = self.client.get(self.url)
+        self.assertNotContains(response, 'id="project-required-support"')
+        self.assertNotContains(response, "invalid list shape")
+
     def test_detail_page_shows_title_full_description_and_category(self):
         response = self.client.get(self.url)
 
@@ -261,6 +327,109 @@ class IdeaModelTests(TestCase):
     def setUp(self):
         self.owner = create_student()
 
+    def test_development_stages_can_be_saved_changed_and_cleared(self):
+        category = Category.objects.get(name="Technology")
+        idea = Idea(
+            title="Project stages",
+            description="A project that progresses through its stages.",
+            owner=self.owner,
+            category=category,
+        )
+        for stage, label in Idea.DevelopmentStage.choices:
+            with self.subTest(stage=stage):
+                idea.development_stage = stage
+                idea.full_clean()
+                idea.save()
+                idea.refresh_from_db()
+                self.assertEqual(idea.development_stage, stage)
+                self.assertEqual(idea.get_development_stage_display(), label)
+
+        idea.development_stage = ""
+        idea.full_clean()
+        idea.save()
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "")
+        self.assertEqual(idea.title, "Project stages")
+        self.assertEqual(idea.description, "A project that progresses through its stages.")
+        self.assertEqual(idea.owner_id, self.owner.pk)
+        self.assertEqual(idea.category_id, category.pk)
+
+    def test_unknown_development_stage_is_rejected(self):
+        idea = Idea(
+            title="Invalid stage",
+            description="A project with an unavailable stage.",
+            owner=self.owner,
+            development_stage="unknown",
+        )
+        with self.assertRaises(ValidationError) as context:
+            idea.full_clean()
+        self.assertIn("development_stage", context.exception.message_dict)
+
+    def test_required_support_selections_can_be_saved_and_cleared(self):
+        idea = Idea(
+            title="Support needs",
+            description="A project seeking several kinds of support.",
+            owner=self.owner,
+        )
+        selections = [[value] for value in Idea.SupportType.values]
+        selections.extend([
+            [Idea.SupportType.FUNDING, Idea.SupportType.TECHNICAL_SUPPORT],
+            list(Idea.SupportType.values),
+            [],
+        ])
+        for values in selections:
+            with self.subTest(support=values):
+                idea.required_support = list(values)
+                idea.full_clean()
+                idea.save()
+                idea.refresh_from_db()
+                self.assertEqual(idea.required_support, values)
+
+    def test_project_stage_and_support_are_optional(self):
+        idea = Idea(
+            title="No needs specified",
+            description="An existing-style project without new metadata.",
+            owner=self.owner,
+        )
+        idea.full_clean()
+        idea.save()
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "")
+        self.assertEqual(idea.required_support, [])
+
+    def test_required_support_defaults_are_independent(self):
+        first = Idea.objects.create(
+            title="First project", description="First description.", owner=self.owner,
+        )
+        second = Idea.objects.create(
+            title="Second project", description="Second description.", owner=self.owner,
+        )
+        first.required_support.append(Idea.SupportType.FUNDING)
+        self.assertEqual(second.required_support, [])
+        first.full_clean()
+        first.save()
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.required_support, [Idea.SupportType.FUNDING])
+        self.assertEqual(second.required_support, [])
+
+    def test_required_support_rejects_invalid_shapes_and_values(self):
+        for value in (
+            None, "", "funding", 0, False, {}, {"type": "funding"},
+            ["unknown"], ["funding", "funding"], [1], [True], [None],
+            [["funding"]], [{"type": "funding"}],
+        ):
+            with self.subTest(support=value):
+                idea = Idea(
+                    title="Invalid support",
+                    description="A project with invalid support selections.",
+                    owner=self.owner,
+                    required_support=value,
+                )
+                with self.assertRaises(ValidationError) as context:
+                    idea.full_clean()
+                self.assertIn("required_support", context.exception.message_dict)
+
     def test_idea_is_stored_with_owner_and_publication_date(self):
         before = timezone.now()
         idea = Idea.objects.create(
@@ -361,6 +530,96 @@ class IdeaFormTests(TestCase):
     def test_valid_form_without_category(self):
         form = IdeaForm({"title": "My idea", "description": "Something useful."})
         self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["development_stage"], "")
+        self.assertEqual(form.cleaned_data["required_support"], [])
+
+    def test_form_saves_updates_and_reloads_stage_and_support_selections(self):
+        idea = Idea(owner=create_student("form-project-owner@example.com"))
+        for stage, support in (
+            ("prototype", ["funding", "technical_support"]),
+            ("launched", ["mentoring", "marketing", "team_members"]),
+        ):
+            with self.subTest(stage=stage, support=support):
+                form = IdeaForm(
+                    {
+                        "title": "Project needs",
+                        "description": "A project seeking help.",
+                        "development_stage": stage,
+                        "required_support": support,
+                    },
+                    instance=idea,
+                )
+                self.assertTrue(form.is_valid(), form.errors)
+                idea = form.save()
+                idea.refresh_from_db()
+                self.assertEqual(idea.development_stage, stage)
+                self.assertEqual(idea.required_support, support)
+                reopened = IdeaForm(instance=idea)
+                self.assertEqual(reopened["development_stage"].value(), stage)
+                self.assertEqual(reopened["required_support"].value(), support)
+
+    def test_form_reports_invalid_stage_and_support_selections(self):
+        for field, value in (
+            ("development_stage", "unknown"),
+            ("required_support", ["unknown"]),
+            ("required_support", ["funding", "funding"]),
+        ):
+            with self.subTest(field=field, value=value):
+                form = IdeaForm({
+                    "title": "Invalid selection",
+                    "description": "A project with an invalid selection.",
+                    field: value,
+                })
+                self.assertFalse(form.is_valid())
+                self.assertIn(field, form.errors)
+
+    def test_blank_stage_and_unselected_support_clear_existing_values(self):
+        idea = Idea.objects.create(
+            title="Original project",
+            description="A project with saved needs.",
+            owner=create_student("clear-project-needs@example.com"),
+            development_stage="mvp",
+            required_support=["funding", "technical_support"],
+        )
+        # Browsers omit the support key when no checkboxes are selected.
+        form = IdeaForm(
+            {
+                "title": idea.title,
+                "description": idea.description,
+                "development_stage": "",
+            },
+            instance=idea,
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "")
+        self.assertEqual(idea.required_support, [])
+
+    def test_owner_and_system_fields_cannot_be_changed_through_form(self):
+        owner = create_student("protected-project-owner@example.com")
+        other = create_student("other-project-owner@example.com")
+        idea = Idea.objects.create(
+            title="Original project", description="Original description.",
+            owner=owner, demo_key="protected-project",
+        )
+        published_at = idea.published_at
+        form = IdeaForm(
+            {
+                "title": "Updated project",
+                "description": "Updated description.",
+                "owner": str(other.pk),
+                "published_at": "2000-01-01T00:00:00Z",
+                "demo_key": "changed-key",
+            },
+            instance=idea,
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        idea.refresh_from_db()
+        self.assertEqual(idea.owner_id, owner.pk)
+        self.assertEqual(idea.published_at, published_at)
+        self.assertEqual(idea.demo_key, "protected-project")
 
     def test_title_is_required(self):
         form = IdeaForm({"title": "", "description": "Something useful."})
@@ -378,7 +637,9 @@ class IdeaFormTests(TestCase):
         self.assertEqual(set(form.errors), {"title", "description"})
 
     def test_fields_follow_the_wireframe_order(self):
-        self.assertEqual(list(IdeaForm().fields), ["title", "description", "category"])
+        self.assertEqual(list(IdeaForm().fields), [
+            "title", "description", "category", "development_stage", "required_support",
+        ])
 
 
 class PublishIdeaAccessTests(TestCase):
@@ -544,6 +805,140 @@ class EditIdeaTests(TestCase):
                 self.assertEqual(self.idea.description, "Original description")
 
 
+class ProjectStageSupportWorkflowTests(TestCase):
+    def setUp(self):
+        self.owner = create_student("project-needs-owner@example.com")
+        self.category = Category.objects.get(name="Technology")
+        self.publish_url = reverse("ideas:publish")
+        self.client.force_login(self.owner)
+
+    def payload(self, **overrides):
+        data = {
+            "title": "Project seeking support",
+            "description": "A project with stage and support needs.",
+            "category": str(self.category.pk),
+            "development_stage": "prototype",
+            "required_support": ["funding", "technical_support"],
+        }
+        data.update(overrides)
+        return data
+
+    def existing_project(self):
+        return Idea.objects.create(
+            title="Original project", description="Original description.",
+            owner=self.owner, category=self.category,
+            development_stage="mvp", required_support=["mentoring"],
+        )
+
+    def test_create_update_clear_and_reopen_project_needs(self):
+        response = self.client.post(self.publish_url, self.payload())
+        self.assertRedirects(response, reverse("ideas:home"))
+        idea = Idea.objects.get(owner=self.owner)
+        self.assertEqual(idea.development_stage, "prototype")
+        self.assertEqual(idea.required_support, ["funding", "technical_support"])
+        edit_url = reverse("ideas:edit", args=[idea.pk])
+        response = self.client.get(edit_url)
+        self.assertEqual(response.context["form"]["development_stage"].value(), "prototype")
+        self.assertEqual(response.context["form"]["required_support"].value(), ["funding", "technical_support"])
+
+        response = self.client.post(edit_url, self.payload(
+            development_stage="growth", required_support=["marketing", "team_members"],
+        ))
+        self.assertRedirects(response, reverse("ideas:home"))
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "growth")
+        self.assertEqual(idea.required_support, ["marketing", "team_members"])
+        response = self.client.get(edit_url)
+        self.assertEqual(response.context["form"]["development_stage"].value(), "growth")
+        self.assertEqual(response.context["form"]["required_support"].value(), ["marketing", "team_members"])
+
+        cleared = self.payload(development_stage="")
+        # An unchecked checkbox group is absent from the browser submission.
+        cleared.pop("required_support")
+        response = self.client.post(edit_url, cleared)
+        self.assertRedirects(response, reverse("ideas:home"))
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "")
+        self.assertEqual(idea.required_support, [])
+        response = self.client.get(edit_url)
+        self.assertEqual(response.context["form"]["development_stage"].value(), "")
+        self.assertEqual(response.context["form"]["required_support"].value(), [])
+        self.assertEqual(idea.owner_id, self.owner.pk)
+        self.assertEqual(Idea.objects.count(), 1)
+
+    def test_invalid_metadata_does_not_publish_a_project(self):
+        for field, value in (
+            ("development_stage", "unknown"),
+            ("required_support", ["unknown"]),
+            ("required_support", ["funding", "funding"]),
+        ):
+            with self.subTest(field=field, value=value):
+                response = self.client.post(self.publish_url, self.payload(**{field: value}))
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(field, response.context["form"].errors)
+                self.assertFalse(Idea.objects.exists())
+
+    def test_invalid_metadata_does_not_change_an_existing_project(self):
+        idea = self.existing_project()
+        edit_url = reverse("ideas:edit", args=[idea.pk])
+        for field, value in (
+            ("development_stage", "unknown"),
+            ("required_support", ["unknown"]),
+            ("required_support", ["funding", "funding"]),
+        ):
+            with self.subTest(field=field, value=value):
+                response = self.client.post(edit_url, self.payload(**{field: value}))
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(field, response.context["form"].errors)
+                idea.refresh_from_db()
+                self.assertEqual(idea.title, "Original project")
+                self.assertEqual(idea.description, "Original description.")
+                self.assertEqual(idea.development_stage, "mvp")
+                self.assertEqual(idea.required_support, ["mentoring"])
+                self.assertEqual(idea.category_id, self.category.pk)
+                self.assertEqual(idea.owner_id, self.owner.pk)
+
+    def test_other_students_and_investors_cannot_change_project_needs(self):
+        idea = self.existing_project()
+        other = create_student("project-needs-other@example.com")
+        investor = User.objects.create_user(
+            email="project-needs-no-edit@example.com", name="Investor",
+            password="Project-needs-password-123!", role=User.Role.INVESTOR,
+        )
+        for viewer in (other, investor):
+            with self.subTest(role=viewer.role):
+                self.client.force_login(viewer)
+                response = self.client.post(
+                    reverse("ideas:edit", args=[idea.pk]), self.payload(),
+                )
+                self.assertEqual(response.status_code, 403)
+                idea.refresh_from_db()
+                self.assertEqual(idea.title, "Original project")
+                self.assertEqual(idea.development_stage, "mvp")
+                self.assertEqual(idea.required_support, ["mentoring"])
+                self.assertEqual(idea.owner_id, self.owner.pk)
+
+    def test_anonymous_and_investor_submissions_cannot_create_projects(self):
+        idea = self.existing_project()
+        self.client.logout()
+        for url in (self.publish_url, reverse("ideas:edit", args=[idea.pk])):
+            with self.subTest(url=url):
+                response = self.client.post(url, self.payload())
+                self.assertEqual(response.status_code, 302)
+                self.assertTrue(response.url.startswith(reverse("accounts:login")))
+
+        investor = User.objects.create_user(
+            email="project-needs-no-publish@example.com", name="Investor",
+            password="Project-needs-password-123!", role=User.Role.INVESTOR,
+        )
+        self.client.force_login(investor)
+        self.assertEqual(self.client.post(self.publish_url, self.payload()).status_code, 403)
+        self.assertEqual(Idea.objects.count(), 1)
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "mvp")
+        self.assertEqual(idea.required_support, ["mentoring"])
+
+
 class RequireEssentialInformationTests(TestCase):
     """Criterion: Require essential information (US001, #4)."""
 
@@ -581,6 +976,16 @@ class RequireEssentialInformationTests(TestCase):
 
 
 class IdeaFormPageTests(TestCase):
+    def assertSupportChecked(self, response, expected):
+        controls = re.findall(
+            r'<input\b[^>]*\bname="required_support"[^>]*>', response.content.decode()
+        )
+        checked = {
+            re.search(r'\bvalue="([^"]+)"', control).group(1)
+            for control in controls if re.search(r'\bchecked(?:\s|=|>)', control)
+        }
+        self.assertEqual(checked, set(expected))
+
     def test_form_follows_the_wireframe(self):
         self.client.force_login(create_student())
         html = self.client.get(reverse("ideas:publish")).content.decode()
@@ -590,10 +995,80 @@ class IdeaFormPageTests(TestCase):
             html.index('name="title"'),
             html.index('name="description"'),
             html.index('name="category"'),
+            html.index('name="development_stage"'),
+            html.index('name="required_support"'),
             html.index(">Publish</button>"),
         ]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("Technology", html)
+
+    def test_create_and_edit_pages_offer_stage_and_support_options(self):
+        owner = create_student()
+        self.client.force_login(owner)
+        idea = Idea.objects.create(
+            title="Project options", description="An existing project.", owner=owner,
+        )
+        for url in (reverse("ideas:publish"), reverse("ideas:edit", args=[idea.pk])):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'name="development_stage"')
+                self.assertContains(response, 'name="required_support"', count=5)
+                self.assertContains(response, 'type="checkbox"', count=5)
+                self.assertContains(response, '<legend class="form-label">')
+                self.assertContains(response, 'id="id_required_support_helptext"')
+                for stage, label in Idea.DevelopmentStage.choices:
+                    self.assertContains(response, f'<option value="{stage}">{label}</option>', html=True)
+                for label in Idea.SupportType.labels:
+                    self.assertContains(response, label)
+
+    def test_edit_page_preselects_saved_stage_and_support(self):
+        owner = create_student()
+        idea = Idea.objects.create(
+            title="Saved needs", description="A project seeking help.", owner=owner,
+            development_stage="mvp", required_support=["funding", "technical_support"],
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get(reverse("ideas:edit", args=[idea.pk]))
+
+        self.assertContains(response, '<option value="mvp" selected>MVP</option>', html=True)
+        self.assertSupportChecked(response, {"funding", "technical_support"})
+
+    def test_invalid_create_and_edit_pages_show_errors_and_keep_valid_selections(self):
+        owner = create_student()
+        idea = Idea.objects.create(
+            title="Original needs", description="Original description.", owner=owner,
+            development_stage="growth", required_support=["mentoring"],
+        )
+        self.client.force_login(owner)
+        for url in (reverse("ideas:publish"), reverse("ideas:edit", args=[idea.pk])):
+            for overrides, error_field, checked in (
+                ({"description": ""}, "description", {"funding", "technical_support"}),
+                ({"development_stage": "unknown"}, "development_stage", {"funding", "technical_support"}),
+                ({"required_support": ["funding", "unknown"]}, "required_support", {"funding"}),
+            ):
+                with self.subTest(url=url, error=error_field):
+                    data = {
+                        "title": "Keep entered title",
+                        "description": "Keep entered description.",
+                        "development_stage": "prototype",
+                        "required_support": ["funding", "technical_support"],
+                    }
+                    data.update(overrides)
+                    response = self.client.post(url, data)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertContains(response, f'id="id_{error_field}_error"')
+                    self.assertContains(response, 'value="Keep entered title"')
+                    self.assertSupportChecked(response, checked)
+                    if error_field != "development_stage":
+                        self.assertContains(response, '<option value="prototype" selected>Prototype</option>', html=True)
+                    idea.refresh_from_db()
+                    self.assertEqual(idea.title, "Original needs")
+                    self.assertEqual(idea.description, "Original description.")
+                    self.assertEqual(idea.development_stage, "growth")
+                    self.assertEqual(idea.required_support, ["mentoring"])
+                    self.assertEqual(Idea.objects.count(), 1)
 
     def test_students_see_the_publish_link(self):
         self.client.force_login(create_student())

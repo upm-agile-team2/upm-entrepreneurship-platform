@@ -169,7 +169,16 @@ class StudentProfileForm(BootstrapFormMixin, forms.ModelForm):
 
     class Meta:
         model = StudentProfile
-        fields = ("bio", "skills", "portfolio_projects", "experience")
+        fields = (
+            "bio",
+            "skills",
+            "portfolio_projects",
+            "experience",
+            "instagram_url",
+            "twitter_url",
+            "youtube_url",
+            "github_url",
+        )
         widgets = {"bio": forms.Textarea(attrs={"rows": 4})}
 
     def __init__(self, *args, **kwargs):

@@ -358,6 +358,62 @@ class StudentProfileModelTests(TestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             StudentProfile.objects.create(user=student)
 
+    def test_social_media_urls_are_saved_and_can_be_cleared(self):
+        urls = {
+            "instagram_url": "https://www.instagram.com/example/",
+            "twitter_url": "http://twitter.com/example",
+            "youtube_url": "https://www.youtube.com/@example",
+            "github_url": "https://github.com/example",
+        }
+        profile = StudentProfile(
+            user=self.create_user("social-links@example.com"), **urls
+        )
+
+        profile.full_clean()
+        profile.save()
+        profile.refresh_from_db()
+
+        for field, url in urls.items():
+            with self.subTest(field=field):
+                self.assertEqual(getattr(profile, field), url)
+            setattr(profile, field, "")
+
+        profile.full_clean()
+        profile.save()
+        profile.refresh_from_db()
+
+        for field in urls:
+            with self.subTest(cleared_field=field):
+                self.assertEqual(getattr(profile, field), "")
+
+    def test_social_media_urls_are_optional(self):
+        profile = StudentProfile(
+            user=self.create_user("no-social-links@example.com")
+        )
+
+        profile.full_clean()
+        profile.save()
+        profile.refresh_from_db()
+
+        for field in ("instagram_url", "twitter_url", "youtube_url", "github_url"):
+            with self.subTest(field=field):
+                self.assertEqual(getattr(profile, field), "")
+
+    def test_social_media_urls_reject_invalid_values(self):
+        student = self.create_user("invalid-social-links@example.com")
+        for field in ("instagram_url", "twitter_url", "youtube_url", "github_url"):
+            for value in (
+                "not-a-url",
+                "ftp://github.com/example",
+                "javascript:alert(1)",
+                "https://github.com/" + "a" * 501,
+            ):
+                with self.subTest(field=field, value=value):
+                    profile = StudentProfile(user=student, **{field: value})
+                    with self.assertRaises(ValidationError) as context:
+                        profile.full_clean()
+                    self.assertIn(field, context.exception.message_dict)
+
     def test_portfolio_and_experience_defaults_are_independent_empty_lists(self):
         first = StudentProfile.objects.create(
             user=self.create_user("profile-first@example.com")
@@ -437,6 +493,81 @@ class StudentProfileFormTests(TestCase):
         }
         data.update(overrides)
         return data
+
+    def test_form_saves_updates_and_clears_social_media_urls(self):
+        urls = {
+            "instagram_url": "https://www.instagram.com/example/",
+            "twitter_url": "https://twitter.com/example",
+            "youtube_url": "https://www.youtube.com/@example",
+            "github_url": "https://github.com/example",
+        }
+        profile = StudentProfile(
+            user=self.create_user("form-social-links@example.com")
+        )
+        for action, values in (
+            ("create", urls),
+            ("update", {field: url.replace("example", "updated") for field, url in urls.items()}),
+            ("clear", {field: "" for field in urls}),
+        ):
+            with self.subTest(action=action):
+                form = StudentProfileForm(self.form_data(**values), instance=profile)
+                self.assertTrue(form.is_valid(), form.errors)
+                profile = form.save()
+                profile.refresh_from_db()
+                for field, expected in values.items():
+                    self.assertEqual(getattr(profile, field), expected)
+
+    def test_form_accepts_omitted_social_media_urls_for_new_profile(self):
+        form = StudentProfileForm(
+            self.form_data(),
+            instance=StudentProfile(
+                user=self.create_user("form-no-social-links@example.com")
+            ),
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        profile = form.save()
+        profile.refresh_from_db()
+
+        for field in ("instagram_url", "twitter_url", "youtube_url", "github_url"):
+            with self.subTest(field=field):
+                self.assertEqual(getattr(profile, field), "")
+
+    def test_form_preserves_existing_social_media_urls_when_omitted(self):
+        urls = {
+            "instagram_url": "https://www.instagram.com/example/",
+            "twitter_url": "https://twitter.com/example",
+            "youtube_url": "https://www.youtube.com/@example",
+            "github_url": "https://github.com/example",
+        }
+        profile = StudentProfile.objects.create(
+            user=self.create_user("form-keep-social-links@example.com"), **urls
+        )
+        form = StudentProfileForm(self.form_data(bio="Updated bio"), instance=profile)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        profile.refresh_from_db()
+
+        self.assertEqual(profile.bio, "Updated bio")
+        for field, expected in urls.items():
+            with self.subTest(field=field):
+                self.assertEqual(getattr(profile, field), expected)
+
+    def test_form_reports_invalid_social_media_urls_on_each_field(self):
+        student = self.create_user("form-invalid-social-links@example.com")
+        for field in ("instagram_url", "twitter_url", "youtube_url", "github_url"):
+            for value in (
+                "not-a-url",
+                "ftp://github.com/example",
+                "javascript:alert(1)",
+                "https://github.com/" + "a" * 501,
+            ):
+                with self.subTest(field=field, value=value):
+                    form = StudentProfileForm(
+                        self.form_data(**{field: value}),
+                        instance=StudentProfile(user=student),
+                    )
+                    self.assertFalse(form.is_valid())
+                    self.assertIn(field, form.errors)
 
     def test_form_selects_existing_skills_and_excludes_ownership(self):
         student = self.create_user("form-student@example.com")
@@ -590,6 +721,61 @@ class StudentProfileWorkflowTests(TestCase):
         self.assertEqual(profile.portfolio_projects, [{"name": "Prototype"}])
         self.assertEqual(profile.experience, [{"position": "Volunteer"}])
         self.assertCountEqual(profile.skills.all(), [skill])
+
+    def test_editor_post_creates_updates_and_clears_social_media_urls(self):
+        urls = {
+            "instagram_url": "https://www.instagram.com/example/",
+            "twitter_url": "https://twitter.com/example",
+            "youtube_url": "https://www.youtube.com/@example",
+            "github_url": "https://github.com/example",
+        }
+        editor_data = {
+            "profile_entries_editor": "1",
+            "projects-TOTAL_FORMS": "0",
+            "projects-INITIAL_FORMS": "0",
+            "experience-TOTAL_FORMS": "0",
+            "experience-INITIAL_FORMS": "0",
+        }
+        for action, values in (
+            ("create", urls),
+            ("update", {field: url.replace("example", "updated") for field, url in urls.items()}),
+            ("clear", {field: "" for field in urls}),
+        ):
+            with self.subTest(action=action):
+                response = self.client.post(
+                    self.url, self.valid_data(**editor_data, **values)
+                )
+                self.assertRedirects(response, self.url)
+                profile = StudentProfile.objects.get(user=self.student)
+                for field, expected in values.items():
+                    self.assertEqual(getattr(profile, field), expected)
+                self.assertEqual(StudentProfile.objects.filter(user=self.student).count(), 1)
+
+    def test_invalid_social_media_post_preserves_existing_profile(self):
+        profile = StudentProfile.objects.create(
+            user=self.student,
+            bio="Keep this bio",
+            github_url="https://github.com/original",
+            portfolio_projects=[{"name": "Keep this project"}],
+            experience=[{"role": "Keep this role"}],
+        )
+        for field in ("instagram_url", "twitter_url", "youtube_url", "github_url"):
+            with self.subTest(field=field):
+                response = self.client.post(
+                    self.url,
+                    self.valid_data(bio="Should not save", **{field: "not-a-url"}),
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(field, response.context["form"].errors)
+                profile.refresh_from_db()
+                self.assertEqual(profile.bio, "Keep this bio")
+                self.assertEqual(profile.github_url, "https://github.com/original")
+                self.assertEqual(profile.instagram_url, "")
+                self.assertEqual(profile.twitter_url, "")
+                self.assertEqual(profile.youtube_url, "")
+                self.assertEqual(profile.portfolio_projects, [{"name": "Keep this project"}])
+                self.assertEqual(profile.experience, [{"role": "Keep this role"}])
 
     def test_post_updates_existing_profile_in_place(self):
         previous_skill = Skill.objects.create(name="Python")
@@ -784,6 +970,94 @@ class StudentProfilePresentationTests(TestCase):
         self.assertNotContains(response, 'name="experience"')
         self.assertContains(response, "No skills are available to select yet.")
         self.assertContains(response, self.own_profile_url)
+        for platform in ("instagram", "twitter", "youtube", "github"):
+            with self.subTest(platform=platform):
+                self.assertContains(response, f'name="{platform}_url"')
+                self.assertContains(response, f'for="id_{platform}_url"')
+
+    def test_editor_displays_social_url_errors_and_preserves_entered_values(self):
+        self.client.force_login(self.student)
+        response = self.client.post(
+            self.edit_url,
+            {
+                "profile_entries_editor": "1",
+                "projects-TOTAL_FORMS": "0",
+                "projects-INITIAL_FORMS": "0",
+                "experience-TOTAL_FORMS": "0",
+                "experience-INITIAL_FORMS": "0",
+                "github_url": "not-a-url",
+                "instagram_url": "https://www.instagram.com/example/",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="id_github_url_error"')
+        self.assertContains(response, "Enter a valid URL.")
+        self.assertContains(response, 'value="not-a-url"')
+        self.assertContains(response, 'value="https://www.instagram.com/example/"')
+        self.assertFalse(StudentProfile.objects.filter(user=self.student).exists())
+
+    def test_owner_and_investor_see_clickable_social_icons(self):
+        urls = {
+            "instagram": "https://www.instagram.com/example/",
+            "twitter": "https://twitter.com/example",
+            "youtube": "https://www.youtube.com/@example",
+            "github": "https://github.com/example",
+        }
+        StudentProfile.objects.create(
+            user=self.student,
+            **{f"{platform}_url": url for platform, url in urls.items()},
+        )
+
+        for viewer, page in (
+            (self.student, self.own_profile_url),
+            (self.investor, self.investor_profile_url),
+        ):
+            with self.subTest(viewer=viewer.role):
+                self.client.force_login(viewer)
+                response = self.client.get(page)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'id="profile-social-title"')
+                self.assertContains(response, 'target="_blank" rel="noopener noreferrer"', count=4)
+                for platform, url in urls.items():
+                    self.assertContains(response, f'href="{url}"')
+                    self.assertContains(response, f'data-social-icon="{platform}"')
+
+    def test_profile_only_displays_filled_social_icons_and_hides_empty_section(self):
+        profile = StudentProfile.objects.create(
+            user=self.student, github_url="https://github.com/example"
+        )
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.investor_profile_url)
+        self.assertContains(response, 'data-social-icon="github"')
+        for platform in ("instagram", "twitter", "youtube"):
+            self.assertNotContains(response, f'data-social-icon="{platform}"')
+
+        profile.github_url = ""
+        profile.save()
+        response = self.client.get(self.investor_profile_url)
+        self.assertNotContains(response, 'id="profile-social-title"')
+        self.assertNotContains(response, "data-social-icon=")
+
+    def test_profile_does_not_render_invalid_urls_stored_outside_the_form(self):
+        StudentProfile.objects.create(
+            user=self.student,
+            bio="A visible bio",
+            instagram_url="not-a-url",
+            twitter_url="javascript:alert(1)",
+            youtube_url="data:text/html,test",
+            github_url="ftp://github.com/example",
+        )
+        self.client.force_login(self.investor)
+
+        response = self.client.get(self.investor_profile_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A visible bio")
+        self.assertNotContains(response, 'id="profile-social-title"')
+        self.assertNotContains(response, "data-social-icon=")
+        self.assertNotContains(response, "javascript:")
 
     def test_my_profile_navigation_is_student_only(self):
         home_url = reverse("ideas:home")
