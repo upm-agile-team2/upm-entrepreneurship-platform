@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Investor profile" %} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section class="form-layout" aria-labelledby="investor-form-title">
+    <header class="form-header">
+      <h1 id="investor-form-title">{% if profile %}{% translate "Edit your investor profile" %}{% else %}{% translate "Create your investor profile" %}{% endif %}</h1>
+      <p>{% translate "Share your experience and the kind of support you can offer students." %}</p>
+    </header>
+    <div class="form-surface">
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% include "includes/form_fields.html" %}
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">{% translate "Save profile" %}</button>
+          <a class="back-link" href="{% url 'accounts:my_investor_profile' %}">{% translate "Back to your profile" %}</a>
+        </div>
+      </form>
+    </div>
+  </section>
+{% endblock %}

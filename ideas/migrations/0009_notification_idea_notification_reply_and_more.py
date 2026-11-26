@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('ideas', '0007_add_project_stage_support'),
+        ('ideas', '0008_merge_collaborators_and_project_stage'),
     ]
 
     operations = [

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{{ investor.name }} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section aria-labelledby="investor-profile-title">
+    <header class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+      <div class="profile-heading">
+        <p class="eyebrow">{% translate "Investor profile" %}</p>
+        <h1 id="investor-profile-title">{{ investor.name }}</h1>
+      </div>
+      {% if is_own_profile and profile %}
+        <a class="btn btn-primary" href="{% url 'accounts:edit_investor_profile' %}">{% translate "Edit profile" %}</a>
+      {% elif not is_own_profile %}
+        <a class="btn btn-outline-secondary" href="{% url 'accounts:investor_discovery' %}">{% translate "Back to investors" %}</a>
+      {% endif %}
+    </header>
+
+    {% if not profile %}
+      <div class="empty-state">
+        <h2>{% translate "Your investor profile is empty" %}</h2>
+        <p>{% translate "Add your experience, interests and the support you can offer." %}</p>
+        <a class="btn btn-primary mt-3" href="{% url 'accounts:edit_investor_profile' %}">{% translate "Create your profile" %}</a>
+      </div>
+    {% else %}
+      <div class="row g-4">
+        <div class="col-12">
+          <section class="card h-100 profile-section" aria-labelledby="investor-bio-title">
+            <div class="card-body">
+              <h2 id="investor-bio-title" class="h4">{% translate "About" %}</h2>
+              {% if profile.bio %}<p class="mb-0">{{ profile.bio|linebreaksbr }}</p>{% else %}<p class="text-body-secondary mb-0">{% translate "No bio added yet." %}</p>{% endif %}
+            </div>
+          </section>
+        </div>
+        <div class="col-12 col-md-6">
+          <section class="card h-100 profile-section" aria-labelledby="investor-interests-title">
+            <div class="card-body">
+              <h2 id="investor-interests-title" class="h4">{% translate "Interests and areas of expertise" %}</h2>
+              {% with interests=profile.interests.all %}
+                {% if interests %}
+                  <ul class="list-unstyled d-flex flex-wrap gap-2 mb-0">
+                    {% for interest in interests %}<li><span class="badge text-bg-secondary">{{ interest.name }}</span></li>{% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="text-body-secondary mb-0">{% translate "No interests added yet." %}</p>
+                {% endif %}
+              {% endwith %}
+            </div>
+          </section>
+        </div>
+        <div class="col-12 col-md-6">
+          <section class="card h-100 profile-section" aria-labelledby="investor-support-title">
+            <div class="card-body">
+              <h2 id="investor-support-title" class="h4">{% translate "Support offered" %}</h2>
+              {% if profile.support_offers %}<p class="mb-0">{{ profile.support_offers|linebreaksbr }}</p>{% else %}<p class="text-body-secondary mb-0">{% translate "No support details added yet." %}</p>{% endif %}
+            </div>
+          </section>
+        </div>
+        <div class="col-12 col-md-6">
+          <section class="card h-100 profile-section" aria-labelledby="investor-experience-title">
+            <div class="card-body">
+              <h2 id="investor-experience-title" class="h4">{% translate "Experience" %}</h2>
+              {% if profile.experience %}<p class="mb-0">{{ profile.experience|linebreaksbr }}</p>{% else %}<p class="text-body-secondary mb-0">{% translate "No experience added yet." %}</p>{% endif %}
+            </div>
+          </section>
+        </div>
+        <div class="col-12 col-md-6">
+          <section class="card h-100 profile-section" aria-labelledby="investor-projects-title">
+            <div class="card-body">
+              <h2 id="investor-projects-title" class="h4">{% translate "Past projects" %}</h2>
+              {% if profile.past_projects %}<p class="mb-0">{{ profile.past_projects|linebreaksbr }}</p>{% else %}<p class="text-body-secondary mb-0">{% translate "No projects added yet." %}</p>{% endif %}
+            </div>
+          </section>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if not is_own_profile %}
+      <section class="card profile-section mt-4" aria-labelledby="investor-feedback-title">
+        <div class="card-body">
+          <h2 id="investor-feedback-title" class="h4">{% translate "Public feedback" %}</h2>
+          <ul class="list-unstyled profile-entries mb-0">
+            {% for item in public_feedback %}
+              <li>
+                <div class="feedback-meta">
+                  <a class="idea-author text-break" href="{% url 'ideas:detail' item.idea_id %}#feedback-{{ item.pk }}">{{ item.idea.title }}</a>
+                  <time datetime="{{ item.timestamp|date:'c' }}">{{ item.timestamp|date:"M j, Y" }}</time>
+                </div>
+                <p class="feedback-text mb-0">{{ item.text|linebreaksbr }}</p>
+              </li>
+            {% empty %}
+              <li class="text-body-secondary">{% translate "No public feedback yet." %}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </section>
+    {% endif %}
+  </section>
+{% endblock %}

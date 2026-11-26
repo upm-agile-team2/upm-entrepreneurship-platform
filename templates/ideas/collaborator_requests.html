@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Collaborator requests" %} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section class="detail-surface" aria-labelledby="requests-heading">
+    <header class="mb-4">
+      <h1 id="requests-heading">{% translate "Collaborator requests" %}</h1>
+      <nav class="nav nav-pills gap-2 mt-3" aria-label="{% translate 'Invitation lists' %}">
+        <a href="{% url 'ideas:collaborator_requests' %}" class="nav-link{% if request_tab == 'received' %} active{% endif %}"{% if request_tab == 'received' %} aria-current="page"{% endif %}>{% translate "Received" %}</a>
+        <a href="{% url 'ideas:collaborator_requests' %}?tab=history" class="nav-link{% if request_tab == 'history' %} active{% endif %}"{% if request_tab == 'history' %} aria-current="page"{% endif %}>{% translate "History" %}</a>
+        <a href="{% url 'ideas:collaborator_requests' %}?tab=sent" class="nav-link{% if request_tab == 'sent' %} active{% endif %}"{% if request_tab == 'sent' %} aria-current="page"{% endif %}>{% translate "Sent" %}</a>
+      </nav>
+      <p class="text-muted mt-3 mb-0">
+        {% if request_tab == 'sent' %}
+          {% translate "Track the invitations you have sent and their current status." %}
+        {% elif request_tab == 'history' %}
+          {% translate "Review invitations you have accepted or declined. These decisions cannot be changed." %}
+        {% else %}
+          {% translate "Review your pending invitations and choose whether to join each project." %}
+        {% endif %}
+      </p>
+    </header>
+
+    {% for invitation in invitations %}
+      <article class="feedback-item" aria-labelledby="request-title-{{ invitation.pk }}">
+        <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
+          <h2 id="request-title-{{ invitation.pk }}" class="h4 text-break">
+            <a href="{% url 'ideas:detail' invitation.idea_id %}">{{ invitation.idea.title }}</a>
+          </h2>
+          <span class="badge {% if invitation.status == 'accepted' %}text-bg-success{% elif invitation.status == 'rejected' %}text-bg-secondary{% else %}text-bg-warning{% endif %}">{{ invitation.get_status_display }}</span>
+        </div>
+        <p class="text-muted mb-2">
+          {% if request_tab == 'sent' %}
+            {% translate "To:" %}
+            {% if invitation.receiver.is_student and invitation.receiver.is_active %}
+              <a href="{% url 'accounts:collaborator_profile' invitation.receiver_id %}">{{ invitation.receiver.name }}</a>
+            {% else %}
+              {{ invitation.receiver.name }}
+            {% endif %}
+          {% else %}
+            {% translate "Created by:" %}
+            {% if invitation.sender.is_student and invitation.sender.is_active %}
+              <a href="{% url 'accounts:collaborator_profile' invitation.sender_id %}">{{ invitation.sender.name }}</a>
+            {% else %}
+              {{ invitation.sender.name }}
+            {% endif %}
+          {% endif %}
+          &middot; <time datetime="{{ invitation.timestamp|date:'c' }}">{{ invitation.timestamp|date:"M j, Y" }}</time>
+        </p>
+        <p class="text-break">{{ invitation.idea.description|linebreaksbr }}</p>
+        {% if request_tab == 'received' %}
+          <form id="respond-request-{{ invitation.pk }}" method="post" action="{% url 'ideas:respond_collaborator_request' invitation.pk %}" class="d-flex flex-wrap gap-2" aria-label="{% blocktranslate with title=invitation.idea.title %}Respond to invitation for {{ title }}{% endblocktranslate %}">
+            {% csrf_token %}
+            <button type="submit" name="action" value="accept" class="btn btn-primary">{% translate "Accept" %}</button>
+            <button type="submit" name="action" value="decline" class="btn btn-outline-secondary">{% translate "Decline" %}</button>
+          </form>
+        {% endif %}
+      </article>
+    {% empty %}
+      <div class="empty-state">
+        {% if request_tab == 'sent' %}
+          <h2>{% translate "No sent invitations yet" %}</h2>
+          <p>{% translate "Open another student's profile to invite them to one of your projects." %}</p>
+          <a href="{% url 'accounts:student_discovery' %}" class="btn btn-outline-primary">{% translate "Find students" %}</a>
+        {% elif request_tab == 'history' %}
+          <h2>{% translate "No accepted or declined invitations yet" %}</h2>
+          <p>{% translate "Invitations you accept or decline will appear here." %}</p>
+        {% else %}
+          <h2>{% translate "No pending invitations" %}</h2>
+          <p>{% translate "New invitations to collaborate on other students' projects will appear here." %}</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </section>
+{% endblock %}

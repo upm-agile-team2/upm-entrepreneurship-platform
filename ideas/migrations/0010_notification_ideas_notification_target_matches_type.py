@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('ideas', '0008_notification_idea_notification_reply_and_more'),
+        ('ideas', '0009_notification_idea_notification_reply_and_more'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
