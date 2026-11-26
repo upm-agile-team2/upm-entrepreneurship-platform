@@ -310,9 +310,12 @@ class ChatViewTests(TestCase):
             response,
             f'datetime="{timezone.localtime(later.timestamp).isoformat()}"',
         )
+        thread_html = response.content.split(
+            b'<section class="chat-message-list"', 1
+        )[1].split(b"</section>", 1)[0]
         self.assertLess(
-            response.content.index(b"First message"),
-            response.content.index(b"Second message"),
+            thread_html.index(b"First message"),
+            thread_html.index(b"Second message"),
         )
 
         invalid = self.client.post(detail_url, {"text": "   "})
@@ -333,5 +336,5 @@ class ChatViewTests(TestCase):
                 response = self.client.get(reverse("ideas:home"))
                 self.assertContains(response, self.list_url)
                 chat_page = self.client.get(self.list_url)
-                self.assertContains(chat_page, "No conversations yet")
+                self.assertContains(chat_page, "No chats yet")
                 self.assertContains(chat_page, "Start a conversation")
