@@ -45,6 +45,9 @@
                   <a class="nav-link nav-action" href="{% url 'ideas:publish' %}">{% translate "Publish an idea" %}</a>
                 </li>
                 <li class="nav-item">
+                  <a class="nav-link" href="{% url 'accounts:investor_discovery' %}"{% if request.resolver_match.view_name == 'accounts:investor_discovery' %} aria-current="page"{% endif %}>{% translate "Investors" %}</a>
+                </li>
+                <li class="nav-item">
                   <a class="nav-link" href="{% url 'accounts:my_profile' %}">{% translate "My profile" %}</a>
                 </li>
               {% elif user.is_investor %}

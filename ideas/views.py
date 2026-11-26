@@ -50,20 +50,6 @@ def idea_detail(request, idea_id):
         ),
         pk=idea_id,
     )
-    visible_feedback = Feedback.objects.select_related("author").prefetch_related(
-        Prefetch(
-            "replies",
-            queryset=Reply.objects.select_related("author"),
-        )
-    ).filter(idea=idea)
-    if not request.user.is_authenticated:
-        visible_feedback = visible_feedback.filter(is_private=False)
-    elif idea.owner_id == request.user.pk:
-        pass
-    else:
-        visible_feedback = visible_feedback.filter(
-            Q(is_private=False) | Q(is_private=True, author=request.user)
-        )
     can_edit = (
         request.user.is_authenticated
         and request.user.is_student
@@ -79,7 +65,7 @@ def idea_detail(request, idea_id):
             "idea": idea,
             "can_edit": can_edit,
             "can_submit_feedback": can_submit_feedback,
-            "feedback_items": visible_feedback,
+            "feedback_items": _visible_feedback(idea, request.user),
             "feedback_form": FeedbackForm(),
             "reply_form": None,
         },
@@ -294,7 +280,7 @@ def toggle_feedback_status(request, feedback_id):
 
 
 def _visible_feedback(idea, user):
-    feedback = Feedback.objects.select_related("author").prefetch_related(
+    feedback = Feedback.objects.select_related("author__investor_profile").prefetch_related(
         Prefetch("replies", queryset=Reply.objects.select_related("author"))
     ).filter(idea=idea)
     if not user.is_authenticated:

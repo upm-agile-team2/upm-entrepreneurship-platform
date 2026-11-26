@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Find investors" %} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section aria-labelledby="investor-discovery-title">
+    <header class="discovery-hero">
+      <h1 id="investor-discovery-title">{% translate "Find investors" %}</h1>
+      <p class="page-intro">{% translate "Explore investors' experience and find people who can support your project." %}</p>
+    </header>
+
+    <form method="get" action="{% url 'accounts:investor_discovery' %}" class="discovery-filter">
+      <div class="filter-field">
+        <label class="form-label" for="{{ filter_form.interest.id_for_label }}">{{ filter_form.interest.label }}</label>
+        {{ filter_form.interest }}
+        {% if filter_form.interest.errors %}
+          <div id="{{ filter_form.interest.auto_id }}_error" class="invalid-feedback" role="alert">
+            {% for error in filter_form.interest.errors %}<div>{{ error }}</div>{% endfor %}
+          </div>
+        {% endif %}
+      </div>
+      <div class="filter-actions">
+        <button type="submit" class="btn btn-primary">{% translate "Apply filter" %}</button>
+        {% if has_filter %}
+          <a class="btn btn-outline-secondary" href="{% url 'accounts:investor_discovery' %}">{% translate "Clear filter" %}</a>
+        {% endif %}
+      </div>
+    </form>
+
+    <div class="section-heading">
+      <h2>{% translate "Investor profiles" %}</h2>
+      {% if not filter_form.errors %}
+        <p class="text-body-secondary small mb-0" role="status">
+          {% blocktranslate count counter=profile_count %}{{ counter }} profile{% plural %}{{ counter }} profiles{% endblocktranslate %}
+        </p>
+      {% endif %}
+    </div>
+
+    {% if filter_form.errors %}
+      <div class="empty-state">
+        <h2>{% translate "Check your interest selection" %}</h2>
+        <p>{% translate "Choose an interest from the list or clear the filter." %}</p>
+      </div>
+    {% elif profiles %}
+      <ul class="row g-4 list-unstyled mb-0">
+        {% for profile in profiles %}
+          <li class="col-12 col-md-6 col-xl-4">
+            <article class="card h-100 idea-card" aria-labelledby="investor-{{ profile.user_id }}">
+              <div class="card-body">
+                <h3 id="investor-{{ profile.user_id }}" class="card-title text-break">
+                  <a class="idea-author" href="{% url 'accounts:investor_profile_detail' profile.user_id %}">{{ profile.user.name }}</a>
+                </h3>
+                {% if profile.bio %}
+                  <p class="text-break">{{ profile.bio|truncatechars:160 }}</p>
+                {% endif %}
+                {% if profile.support_offers %}
+                  <p class="small text-break"><strong>{% translate "Support offered" %}</strong><br>{{ profile.support_offers|truncatechars:100 }}</p>
+                {% endif %}
+                {% with interests=profile.interests.all %}
+                  {% if interests %}
+                    <ul class="list-unstyled d-flex flex-wrap gap-2 mt-auto mb-0" aria-label="{% translate 'Interests' %}">
+                      {% for interest in interests %}<li><span class="badge text-bg-secondary">{{ interest.name }}</span></li>{% endfor %}
+                    </ul>
+                  {% endif %}
+                {% endwith %}
+              </div>
+            </article>
+          </li>
+        {% endfor %}
+      </ul>
+    {% elif selected_interest %}
+      <div class="empty-state">
+        <h2>{% translate "No matching investor profiles" %}</h2>
+        <p>{% blocktranslate with interest=selected_interest.name %}No investors match {{ interest }}. Try another interest or clear the filter.{% endblocktranslate %}</p>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <h2>{% translate "No investor profiles yet" %}</h2>
+        <p>{% translate "Investors will appear here after they create their profiles." %}</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

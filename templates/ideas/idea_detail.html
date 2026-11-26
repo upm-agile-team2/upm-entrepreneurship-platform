@@ -103,7 +103,15 @@
     {% for feedback in feedback_items %}
       <article id="feedback-{{ feedback.pk }}" class="feedback-item" aria-label="{% translate 'Feedback item' %}">
         <div class="feedback-meta">
-          <strong>{% if feedback.author %}{{ feedback.author.name }}{% else %}{% translate "Former user" %}{% endif %}</strong>
+          <strong>
+            {% if user.is_student and feedback.author.is_investor and feedback.author.is_active and feedback.author.investor_profile %}
+              <a class="idea-author" href="{% url 'accounts:investor_profile_detail' feedback.author_id %}">{{ feedback.author.name }}</a>
+            {% elif feedback.author %}
+              {{ feedback.author.name }}
+            {% else %}
+              {% translate "Former user" %}
+            {% endif %}
+          </strong>
           <time datetime="{{ feedback.timestamp|date:'c' }}">{{ feedback.timestamp|date:"M j, Y" }}</time>
           {% if feedback.is_private %}<span class="badge text-bg-warning">{% translate "Private" %}</span>{% endif %}
           {% if feedback.status == "resolved" %}<span class="badge text-bg-success">{% translate "Resolved" %}</span>{% endif %}
