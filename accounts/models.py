@@ -153,6 +153,44 @@ class StudentProfile(models.Model):
         return f"{self.user} profile"
 
 
+class InvestorInterest(models.Model):
+    name = models.CharField(_("name"), max_length=80)
+    normalized_name = models.CharField(max_length=240, unique=True, editable=False)
+
+    class Meta:
+        ordering = ["normalized_name"]
+
+    def __str__(self):
+        return self.name
+
+
+class InvestorProfile(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("user"),
+        on_delete=models.CASCADE,
+        related_name="investor_profile",
+    )
+    bio = models.TextField(_("bio"), max_length=1500, blank=True)
+    experience = models.TextField(_("experience"), max_length=3000, blank=True)
+    past_projects = models.TextField(_("past projects"), max_length=3000, blank=True)
+    interests = models.ManyToManyField(
+        InvestorInterest,
+        verbose_name=_("areas of interest"),
+        related_name="investor_profiles",
+        blank=True,
+    )
+    support_offers = models.TextField(_("support offered"), max_length=1500, blank=True)
+
+    def clean(self):
+        super().clean()
+        if self.user_id and not self.user.is_investor:
+            raise ValidationError({"user": _("Only investor accounts can have an investor profile.")})
+
+    def __str__(self):
+        return f"{self.user.name} (investor profile)"
+
+
 class Follow(models.Model):
     investor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
