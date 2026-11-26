@@ -6,7 +6,7 @@
 {% block content %}
   <section class="chat-workspace chat-workspace--thread" aria-label="{% translate 'Chats' %}">
     {% include "chat/includes/conversation_sidebar.html" %}
-    <main class="chat-main" aria-labelledby="conversation-heading">
+    <section class="chat-main" aria-labelledby="conversation-heading">
       <header class="chat-thread-header">
         <a class="chat-back-link" href="{% url 'chat:list' %}">{% translate "All chats" %}</a>
         <span class="chat-avatar chat-thread-avatar" aria-hidden="true">
@@ -50,6 +50,6 @@
         </div>
         <button type="submit" class="btn btn-primary">{% translate "Send" %}</button>
       </form>
-    </main>
+    </section>
   </section>
 {% endblock %}

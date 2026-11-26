@@ -244,7 +244,10 @@ class ChatViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.context["conversations"]), [own])
         self.assertContains(response, self.investor.name)
-        self.assertNotContains(response, "Foreign Account")
+        conversation_list_html = response.content.split(
+            b'<nav class="chat-conversation-list"', 1
+        )[1].split(b"</nav>", 1)[0]
+        self.assertNotIn(b"Foreign Account", conversation_list_html)
         self.assertNotIn(self.student, foreign.participants.all())
 
     def test_nonparticipant_cannot_view_or_send_to_another_conversation(self):
@@ -338,3 +341,6 @@ class ChatViewTests(TestCase):
                 chat_page = self.client.get(self.list_url)
                 self.assertContains(chat_page, "No chats yet")
                 self.assertContains(chat_page, "Start a conversation")
+                self.assertContains(chat_page, "Other Account")
+                self.assertNotContains(chat_page, "chat-view-other@example.com")
+                self.assertEqual(chat_page.content.count(b"<main"), 1)

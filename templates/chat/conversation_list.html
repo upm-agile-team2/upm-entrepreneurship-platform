@@ -6,12 +6,12 @@
 {% block content %}
   <section class="chat-workspace chat-workspace--list" aria-label="{% translate 'Chats' %}">
     {% include "chat/includes/conversation_sidebar.html" %}
-    <main class="chat-main chat-main--empty">
+    <div class="chat-main chat-main--empty">
       <div class="chat-welcome">
         <span class="chat-welcome-icon" aria-hidden="true">↔</span>
         <h2>{% translate "Your chats, all in one place" %}</h2>
         <p>{% translate "Choose a conversation or start a new chat to exchange messages." %}</p>
       </div>
-    </main>
+    </div>
   </section>
 {% endblock %}

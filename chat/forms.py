@@ -21,11 +21,16 @@ class StartConversationForm(forms.Form):
 
     def __init__(self, *args, user, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["recipient"].label_from_instance = self._recipient_label
         self.fields["recipient"].queryset = (
             User.objects.filter(is_active=True)
             .exclude(pk=user.pk)
             .order_by("name", "pk")
         )
+
+    @staticmethod
+    def _recipient_label(recipient):
+        return recipient.name
 
 
 class MessageForm(forms.ModelForm):
