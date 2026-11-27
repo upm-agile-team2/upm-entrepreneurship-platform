@@ -10,6 +10,7 @@
       <p>{% translate "Share your experience and the kind of support you can offer students." %}</p>
     </header>
     <div class="form-surface">
+      {% include "accounts/includes/avatar_upload.html" with avatar_user=request.user only %}
       <form method="post" novalidate>
         {% csrf_token %}
         {% include "includes/form_fields.html" %}

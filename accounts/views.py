@@ -11,7 +11,13 @@ from django.urls import reverse_lazy
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
-from .forms import EmailAuthenticationForm, ProfileEntryFormSet, SignUpForm, StudentProfileForm
+from .forms import (
+    AvatarUploadForm,
+    EmailAuthenticationForm,
+    ProfileEntryFormSet,
+    SignUpForm,
+    StudentProfileForm,
+)
 from .models import Follow, ProfileVisit, StudentProfile
 from .profile_display import collaborator_profile_context, profile_display_context
 
@@ -87,6 +93,22 @@ def student_profile(request):
     )
 
 
+@login_required(login_url=reverse_lazy("accounts:login"))
+@require_POST
+def upload_avatar(request):
+    form = AvatarUploadForm(request.POST, request.FILES, instance=request.user)
+    if form.is_valid():
+        form.save()
+        messages.success(request, _("Your profile picture has been updated."))
+    else:
+        for error in form.errors.get("avatar", []):
+            messages.error(request, error)
+
+    if request.user.is_student:
+        return redirect("accounts:student_profile")
+    if request.user.is_investor:
+        return redirect("accounts:my_investor_profile")
+    return redirect("ideas:home")
 @require_GET
 @login_required(login_url=reverse_lazy("accounts:login"))
 def my_profile(request):
