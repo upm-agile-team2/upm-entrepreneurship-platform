@@ -4,6 +4,8 @@ import re
 from django.test import TestCase
 from django.urls import reverse
 
+from ideas.models import Idea
+
 from .discovery import StudentProfileFilterForm, student_profiles
 from .models import ProfileVisit, Skill, StudentProfile, User
 
@@ -96,15 +98,44 @@ class ProfileDiscoveryViewTests(ProfileDiscoveryData, TestCase):
             self.client.get(self.url), f"{reverse('accounts:login')}?next={self.url}"
         )
 
-    def test_student_cannot_open_the_investor_directory(self):
+    def test_student_can_browse_other_students_without_seeing_their_own_card(self):
         self.client.force_login(self.alex)
-        self.assertEqual(self.client.get(self.url).status_code, 403)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["profiles"], [self.empty_profile, self.marta_profile])
+        self.assertEqual(response.context["profile_count"], 2)
+        self.assertContains(
+            response, reverse("accounts:collaborator_profile", args=[self.marta.pk])
+        )
+        self.assertNotContains(
+            response, reverse("accounts:collaborator_profile", args=[self.alex.pk])
+        )
+        self.assertNotContains(
+            response, reverse("accounts:investor_profile", args=[self.marta.pk])
+        )
+
+    def test_student_filters_do_not_reintroduce_their_own_profile(self):
+        self.client.force_login(self.alex)
+        matching = self.client.get(self.url, {"skill": self.robotics.pk})
+        self.assertEqual(matching.context["profiles"], [self.marta_profile])
+
+        only_self = self.client.get(self.url, {"skill": self.python.pk})
+        self.assertEqual(only_self.context["profiles"], [])
+        self.assertContains(only_self, "No matching profiles")
+
+        invalid = self.client.get(self.url, {"skill": "invalid"})
+        self.assertEqual(invalid.context["profiles"], [])
+        self.assertContains(invalid, "Choose a skill from the list.")
+        self.assertFalse(ProfileVisit.objects.exists())
 
     def test_only_get_requests_are_accepted(self):
-        self.client.force_login(self.investor)
-        for method in ("POST", "PUT", "DELETE"):
-            with self.subTest(method=method):
-                self.assertEqual(self.client.generic(method, self.url).status_code, 405)
+        for user in (self.investor, self.alex):
+            self.client.force_login(user)
+            for method in ("POST", "PUT", "DELETE"):
+                with self.subTest(user=user.pk, method=method):
+                    self.assertEqual(self.client.generic(method, self.url).status_code, 405)
 
     def test_browsing_filtering_and_invalid_filters_do_not_record_visits(self):
         self.client.force_login(self.investor)
@@ -196,7 +227,7 @@ class ProfileDiscoveryPresentationTests(ProfileDiscoveryData, TestCase):
         self.assertContains(response, "All skills")
         self.assertEqual(response.context["profile_count"], 3)
 
-    def test_navigation_shows_discovery_to_investors_and_notifications_to_students(self):
+    def test_navigation_shows_discovery_and_notifications_to_authenticated_users(self):
         for user in (self.investor, self.alex, None):
             with self.subTest(user=user.pk if user else None):
                 self.client.logout()
@@ -204,12 +235,12 @@ class ProfileDiscoveryPresentationTests(ProfileDiscoveryData, TestCase):
                     self.client.force_login(user)
                 response = self.client.get(reverse("ideas:home"))
                 link = f'href="{self.url}"'
-                if user == self.investor:
+                if user is not None:
                     self.assertContains(response, link)
                 else:
                     self.assertNotContains(response, link)
                 notifications_link = f'href="{reverse("ideas:notifications")}"'
-                if user == self.alex:
+                if user:
                     self.assertContains(response, notifications_link)
                 else:
                     self.assertNotContains(response, notifications_link)
@@ -249,3 +280,22 @@ class ProfileDiscoveryAcceptanceTests(ProfileDiscoveryData, TestCase):
         self.client.force_login(self.alex)
         own_profile = self.client.get(reverse("accounts:my_profile"))
         self.assertContains(own_profile, "Investors have visited your profile 1 time.")
+
+    def test_project_owner_can_open_another_students_profile_from_the_directory(self):
+        Idea.objects.create(
+            title="Student collaboration project",
+            description="A project seeking collaborators.",
+            owner=self.alex,
+        )
+        self.client.force_login(self.alex)
+
+        directory = self.client.get(self.url)
+        profile_url = reverse("accounts:collaborator_profile", args=[self.marta.pk])
+        self.assertContains(directory, f'href="{profile_url}"')
+        profile = self.client.get(profile_url)
+
+        self.assertEqual(profile.status_code, 200)
+        self.assertContains(profile, self.marta_profile.bio)
+        self.assertTrue(profile.context["has_owned_ideas"])
+        self.assertFalse(profile.context["is_own_profile"])
+        self.assertFalse(ProfileVisit.objects.exists())

@@ -5,13 +5,24 @@ from .models import Feedback, Idea, Reply
 
 
 class IdeaForm(forms.ModelForm):
+    required_support = forms.MultipleChoiceField(
+        label=_("Required support"),
+        choices=Idea.SupportType.choices,
+        required=False,
+        widget=forms.CheckboxSelectMultiple(attrs={"class": "form-check-input"}),
+        help_text=_("Select all types of support your project needs."),
+    )
+
     class Meta:
         model = Idea
-        fields = ["title", "description", "category"]
+        fields = [
+            "title", "description", "category", "development_stage", "required_support",
+        ]
         widgets = {
             "title": forms.TextInput(attrs={"class": "form-control"}),
             "description": forms.Textarea(attrs={"class": "form-control", "rows": 6}),
             "category": forms.Select(attrs={"class": "form-select"}),
+            "development_stage": forms.Select(attrs={"class": "form-select"}),
         }
         error_messages = {
             "title": {"required": _("Please enter a title for your idea.")},
@@ -21,12 +32,36 @@ class IdeaForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["category"].empty_label = _("Select a category")
+        self.fields["development_stage"].choices = [
+            ("", _("Not specified")), *Idea.DevelopmentStage.choices,
+        ]
 
     def full_clean(self):
         super().full_clean()
         for name in self.errors:
             widget = self.fields[name].widget
             widget.attrs["class"] = f"{widget.attrs.get('class', '')} is-invalid".strip()
+
+
+class CollaboratorRequestForm(forms.Form):
+    idea = forms.ModelChoiceField(
+        queryset=Idea.objects.none(),
+        label=_("Your project"),
+        empty_label=_("Select a project"),
+        help_text=_("Choose the project you want this student to help develop."),
+        widget=forms.Select(attrs={"class": "form-select"}),
+        error_messages={
+            "required": _("Please select one of your published projects."),
+            "invalid_choice": _("Select one of your own published projects."),
+        },
+    )
+
+    def __init__(self, *args, owner, **kwargs):
+        super().__init__(*args, **kwargs)
+        if owner.is_authenticated and owner.is_student and owner.pk is not None:
+            self.fields["idea"].queryset = Idea.objects.filter(owner=owner).order_by(
+                "title", "pk"
+            )
 
 
 class FeedbackForm(forms.ModelForm):

@@ -25,10 +25,44 @@
       {% endif %}
       <time datetime="{{ idea.published_at|date:'c' }}">{{ idea.published_at|date:"M j, Y" }}</time>
     </div>
+    {% with support_labels=idea.required_support_labels %}
+      {% if idea.development_stage or support_labels %}
+        <div id="project-needs" class="d-flex flex-column gap-3 mt-4">
+          {% if idea.development_stage %}
+            <div id="project-development-stage" class="d-flex flex-wrap align-items-center gap-2">
+              <span class="small text-body-secondary">{% translate "Development stage" %}:</span>
+              <span class="badge text-bg-primary">{{ idea.get_development_stage_display }}</span>
+            </div>
+          {% endif %}
+          {% if support_labels %}
+            <div id="project-required-support" class="d-flex flex-wrap align-items-center gap-2">
+              <span class="small text-body-secondary">{% translate "Support needed" %}:</span>
+              {% for label in support_labels %}<span class="badge text-bg-secondary">{{ label }}</span>{% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+    {% endwith %}
     </header>
     <div class="detail-description">
       <p class="mb-0">{{ idea.description|linebreaksbr }}</p>
     </div>
+    <section class="mt-4" aria-labelledby="collaborators-heading">
+      <h2 id="collaborators-heading" class="h4">{% translate "Collaborators" %}</h2>
+      <ul class="list-unstyled mb-0">
+        {% for collaborator in idea.collaborators.all %}
+          <li class="text-break">
+            {% if user.is_authenticated and user.is_student and collaborator.is_student and collaborator.is_active %}
+              <a href="{% url 'accounts:collaborator_profile' collaborator.pk %}">{{ collaborator.name }}</a>
+            {% else %}
+              {{ collaborator.name }}
+            {% endif %}
+          </li>
+        {% empty %}
+          <li class="text-muted">{% translate "No collaborators yet." %}</li>
+        {% endfor %}
+      </ul>
+    </section>
     <div class="detail-actions">
       <a href="{% url 'ideas:home' %}" class="btn btn-outline-secondary">{% translate "Back to ideas" %}</a>
       {% if can_edit %}
@@ -69,7 +103,15 @@
     {% for feedback in feedback_items %}
       <article id="feedback-{{ feedback.pk }}" class="feedback-item" aria-label="{% translate 'Feedback item' %}">
         <div class="feedback-meta">
-          <strong>{% if feedback.author %}{{ feedback.author.name }}{% else %}{% translate "Former user" %}{% endif %}</strong>
+          <strong>
+            {% if user.is_student and feedback.author.is_investor and feedback.author.is_active and feedback.author.investor_profile %}
+              <a class="idea-author" href="{% url 'accounts:investor_profile_detail' feedback.author_id %}">{{ feedback.author.name }}</a>
+            {% elif feedback.author %}
+              {{ feedback.author.name }}
+            {% else %}
+              {% translate "Former user" %}
+            {% endif %}
+          </strong>
           <time datetime="{{ feedback.timestamp|date:'c' }}">{{ feedback.timestamp|date:"M j, Y" }}</time>
           {% if feedback.is_private %}<span class="badge text-bg-warning">{% translate "Private" %}</span>{% endif %}
           {% if feedback.status == "resolved" %}<span class="badge text-bg-success">{% translate "Resolved" %}</span>{% endif %}
@@ -97,7 +139,7 @@
         {% endif %}
 
         {% for reply in feedback.replies.all %}
-          <div class="feedback-reply">
+          <div id="reply-{{ reply.pk }}" class="feedback-reply">
             <div class="feedback-meta">
               <strong>{% if reply.author %}{{ reply.author.name }}{% else %}{% translate "Former user" %}{% endif %}</strong>
               <time datetime="{{ reply.timestamp|date:'c' }}">{{ reply.timestamp|date:"M j, Y" }}</time>

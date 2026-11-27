@@ -1,7 +1,9 @@
 from io import StringIO
 import re
+from unittest.mock import patch
 
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
 from django.core.management import CommandError, call_command
 from django.db import IntegrityError, transaction
@@ -10,7 +12,8 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .forms import IdeaForm
+from accounts.models import Follow
+from .forms import CollaboratorRequestForm, IdeaForm
 from .management.commands.seed_demo_ideas import (
     DEMO_AUTHOR_KEY_PREFIX,
     DEMO_IDEA_KEY_PREFIX,
@@ -18,7 +21,15 @@ from .management.commands.seed_demo_ideas import (
     DEMO_STUDENTS,
     demo_email,
 )
-from .models import Category, Feedback, Idea, Notification, Reply
+from .models import (
+    Category,
+    Collaborator,
+    CollaboratorRequest,
+    Feedback,
+    Idea,
+    Notification,
+    Reply,
+)
 
 User = get_user_model()
 
@@ -151,6 +162,72 @@ class IdeaDetailPageTests(TestCase):
         )
         self.url = reverse("ideas:detail", args=[self.idea.pk])
 
+    def test_other_users_see_stage_and_support_badges(self):
+        self.idea.development_stage = "prototype"
+        self.idea.required_support = list(Idea.SupportType.values)
+        self.idea.save()
+        student = create_student("project-detail-viewer@example.com")
+        investor = User.objects.create_user(
+            email="project-needs-investor@example.com", name="Needs Investor",
+            password="Project-needs-password-123!", role=User.Role.INVESTOR,
+        )
+        for viewer in (student, investor, None):
+            with self.subTest(viewer=viewer.role if viewer else "anonymous"):
+                if viewer:
+                    self.client.force_login(viewer)
+                else:
+                    self.client.logout()
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'id="project-development-stage"')
+                self.assertContains(response, '<span class="badge text-bg-primary">Prototype</span>', html=True)
+                self.assertContains(response, 'id="project-required-support"')
+                for label in Idea.SupportType.labels:
+                    self.assertContains(response, f'<span class="badge text-bg-secondary">{label}</span>', html=True)
+                self.assertNotContains(response, "technical_support")
+                self.assertNotContains(response, "team_members")
+                self.assertNotContains(response, reverse("ideas:edit", args=[self.idea.pk]))
+
+    def test_partial_and_cleared_project_needs_hide_empty_badges(self):
+        self.client.force_login(create_student("partial-needs-viewer@example.com"))
+        for stage, support in (
+            ("mvp", []), ("", ["team_members"]), ("", []),
+        ):
+            with self.subTest(stage=stage, support=support):
+                self.idea.development_stage = stage
+                self.idea.required_support = support
+                self.idea.save()
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, self.idea.title)
+                self.assertContains(response, self.category.name)
+                if stage:
+                    self.assertContains(response, 'id="project-development-stage"')
+                    self.assertContains(response, '<span class="badge text-bg-primary">MVP</span>', html=True)
+                else:
+                    self.assertNotContains(response, 'id="project-development-stage"')
+                if support:
+                    self.assertContains(response, 'id="project-required-support"')
+                    self.assertContains(response, '<span class="badge text-bg-secondary">Team members</span>', html=True)
+                else:
+                    self.assertNotContains(response, 'id="project-required-support"')
+                if not stage and not support:
+                    self.assertNotContains(response, 'id="project-needs"')
+
+    def test_support_badges_use_known_labels_without_duplicates(self):
+        # Direct saves can bypass model validation; never display raw JSON.
+        self.idea.required_support = ["unknown", "funding", "funding", {"type": "funding"}]
+        self.idea.save()
+        response = self.client.get(self.url)
+        self.assertContains(response, '<span class="badge text-bg-secondary">Funding</span>', count=1, html=True)
+        self.assertNotContains(response, "unknown")
+
+        self.idea.required_support = {"funding": "invalid list shape"}
+        self.idea.save()
+        response = self.client.get(self.url)
+        self.assertNotContains(response, 'id="project-required-support"')
+        self.assertNotContains(response, "invalid list shape")
+
     def test_detail_page_shows_title_full_description_and_category(self):
         response = self.client.get(self.url)
 
@@ -261,6 +338,109 @@ class IdeaModelTests(TestCase):
     def setUp(self):
         self.owner = create_student()
 
+    def test_development_stages_can_be_saved_changed_and_cleared(self):
+        category = Category.objects.get(name="Technology")
+        idea = Idea(
+            title="Project stages",
+            description="A project that progresses through its stages.",
+            owner=self.owner,
+            category=category,
+        )
+        for stage, label in Idea.DevelopmentStage.choices:
+            with self.subTest(stage=stage):
+                idea.development_stage = stage
+                idea.full_clean()
+                idea.save()
+                idea.refresh_from_db()
+                self.assertEqual(idea.development_stage, stage)
+                self.assertEqual(idea.get_development_stage_display(), label)
+
+        idea.development_stage = ""
+        idea.full_clean()
+        idea.save()
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "")
+        self.assertEqual(idea.title, "Project stages")
+        self.assertEqual(idea.description, "A project that progresses through its stages.")
+        self.assertEqual(idea.owner_id, self.owner.pk)
+        self.assertEqual(idea.category_id, category.pk)
+
+    def test_unknown_development_stage_is_rejected(self):
+        idea = Idea(
+            title="Invalid stage",
+            description="A project with an unavailable stage.",
+            owner=self.owner,
+            development_stage="unknown",
+        )
+        with self.assertRaises(ValidationError) as context:
+            idea.full_clean()
+        self.assertIn("development_stage", context.exception.message_dict)
+
+    def test_required_support_selections_can_be_saved_and_cleared(self):
+        idea = Idea(
+            title="Support needs",
+            description="A project seeking several kinds of support.",
+            owner=self.owner,
+        )
+        selections = [[value] for value in Idea.SupportType.values]
+        selections.extend([
+            [Idea.SupportType.FUNDING, Idea.SupportType.TECHNICAL_SUPPORT],
+            list(Idea.SupportType.values),
+            [],
+        ])
+        for values in selections:
+            with self.subTest(support=values):
+                idea.required_support = list(values)
+                idea.full_clean()
+                idea.save()
+                idea.refresh_from_db()
+                self.assertEqual(idea.required_support, values)
+
+    def test_project_stage_and_support_are_optional(self):
+        idea = Idea(
+            title="No needs specified",
+            description="An existing-style project without new metadata.",
+            owner=self.owner,
+        )
+        idea.full_clean()
+        idea.save()
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "")
+        self.assertEqual(idea.required_support, [])
+
+    def test_required_support_defaults_are_independent(self):
+        first = Idea.objects.create(
+            title="First project", description="First description.", owner=self.owner,
+        )
+        second = Idea.objects.create(
+            title="Second project", description="Second description.", owner=self.owner,
+        )
+        first.required_support.append(Idea.SupportType.FUNDING)
+        self.assertEqual(second.required_support, [])
+        first.full_clean()
+        first.save()
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.required_support, [Idea.SupportType.FUNDING])
+        self.assertEqual(second.required_support, [])
+
+    def test_required_support_rejects_invalid_shapes_and_values(self):
+        for value in (
+            None, "", "funding", 0, False, {}, {"type": "funding"},
+            ["unknown"], ["funding", "funding"], [1], [True], [None],
+            [["funding"]], [{"type": "funding"}],
+        ):
+            with self.subTest(support=value):
+                idea = Idea(
+                    title="Invalid support",
+                    description="A project with invalid support selections.",
+                    owner=self.owner,
+                    required_support=value,
+                )
+                with self.assertRaises(ValidationError) as context:
+                    idea.full_clean()
+                self.assertIn("required_support", context.exception.message_dict)
+
     def test_idea_is_stored_with_owner_and_publication_date(self):
         before = timezone.now()
         idea = Idea.objects.create(
@@ -294,6 +474,372 @@ class IdeaModelTests(TestCase):
         )
         with self.assertRaises(ProtectedError):
             category.delete()
+
+
+class CollaboratorModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("collaboration-owner@example.com")
+        cls.student = create_student("collaboration-student@example.com")
+        cls.idea = Idea.objects.create(
+            title="Campus bike sharing",
+            description="Share bikes between faculties.",
+            owner=cls.owner,
+        )
+
+    def test_membership_is_stored_with_idea_student_and_timestamp(self):
+        before = timezone.now()
+        membership = Collaborator(idea=self.idea, collaborator=self.student)
+
+        membership.full_clean()
+        membership.save()
+        membership.refresh_from_db()
+
+        self.assertIsNotNone(membership.pk)
+        self.assertEqual(membership.idea, self.idea)
+        self.assertEqual(membership.collaborator, self.student)
+        self.assertGreaterEqual(membership.timestamp, before)
+        self.assertLessEqual(membership.timestamp, timezone.now())
+
+    def test_membership_can_be_queried_from_project_and_student(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.student
+        )
+
+        self.assertEqual(list(self.idea.collaborators.all()), [self.student])
+        self.assertEqual(list(self.student.collaborating_ideas.all()), [self.idea])
+        self.assertEqual(list(self.idea.collaborator_memberships.all()), [membership])
+        self.assertEqual(list(self.student.idea_collaborations.all()), [membership])
+
+    def test_duplicate_membership_fails_model_validation(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.student
+        )
+        duplicate = Collaborator(idea=self.idea, collaborator=self.student)
+
+        with self.assertRaises(ValidationError):
+            duplicate.full_clean()
+
+        self.assertEqual(list(Collaborator.objects.all()), [membership])
+
+    def test_database_rejects_duplicate_membership_without_model_validation(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.student
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Collaborator.objects.create(idea=self.idea, collaborator=self.student)
+
+        self.assertEqual(list(Collaborator.objects.all()), [membership])
+
+    def test_investor_cannot_be_validated_as_a_collaborator(self):
+        investor = User.objects.create_user(
+            email="collaboration-investor@example.com",
+            password="A-valid-password-123!",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        membership = Collaborator(idea=self.idea, collaborator=investor)
+
+        with self.assertRaises(ValidationError) as caught:
+            membership.full_clean()
+
+        self.assertIn("collaborator", caught.exception.message_dict)
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_project_owner_cannot_be_validated_as_a_collaborator(self):
+        membership = Collaborator(idea=self.idea, collaborator=self.owner)
+
+        with self.assertRaises(ValidationError) as caught:
+            membership.full_clean()
+
+        self.assertIn("collaborator", caught.exception.message_dict)
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_missing_foreign_keys_produce_validation_errors(self):
+        with self.assertRaises(ValidationError) as caught:
+            Collaborator().full_clean()
+
+        self.assertIn("idea", caught.exception.message_dict)
+        self.assertIn("collaborator", caught.exception.message_dict)
+
+    def test_nonexistent_foreign_keys_produce_validation_errors(self):
+        missing_id = max(self.idea.pk, self.owner.pk, self.student.pk) + 100
+        cases = (
+            (Collaborator(idea_id=missing_id, collaborator=self.student), "idea"),
+            (Collaborator(idea=self.idea, collaborator_id=missing_id), "collaborator"),
+        )
+
+        for membership, field in cases:
+            with self.subTest(field=field):
+                with self.assertRaises(ValidationError) as caught:
+                    membership.full_clean()
+                self.assertIn(field, caught.exception.message_dict)
+
+    def test_different_project_or_student_can_have_separate_memberships(self):
+        other_student = create_student("another-collaborator@example.com")
+        other_idea = Idea.objects.create(
+            title="Study planner",
+            description="Plan exams together.",
+            owner=self.owner,
+        )
+        pairs = (
+            (self.idea, self.student),
+            (self.idea, other_student),
+            (other_idea, self.student),
+        )
+
+        for idea, student in pairs:
+            membership = Collaborator(idea=idea, collaborator=student)
+            membership.full_clean()
+            membership.save()
+
+        self.assertEqual(Collaborator.objects.count(), 3)
+        self.assertCountEqual(
+            self.idea.collaborators.all(), [self.student, other_student]
+        )
+        self.assertCountEqual(
+            self.student.collaborating_ideas.all(), [self.idea, other_idea]
+        )
+
+
+class CollaboratorRequestModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("request-owner@example.com")
+        cls.receiver = create_student("request-receiver@example.com")
+        cls.other_student = create_student("request-other-student@example.com")
+        cls.investor = User.objects.create_user(
+            email="request-investor@example.com",
+            password="A-valid-password-123!",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        cls.idea = Idea.objects.create(
+            title="Campus bike sharing",
+            description="Share bikes between faculties.",
+            owner=cls.owner,
+        )
+
+    def make_request(self, **overrides):
+        fields = {
+            "idea": self.idea,
+            "sender": self.owner,
+            "receiver": self.receiver,
+        }
+        fields.update(overrides)
+        return CollaboratorRequest(**fields)
+
+    def test_request_is_stored_with_participants_timestamp_and_pending_status(self):
+        before = timezone.now()
+        invitation = self.make_request()
+
+        invitation.full_clean()
+        invitation.save()
+        invitation.refresh_from_db()
+
+        self.assertIsNotNone(invitation.pk)
+        self.assertEqual(invitation.idea, self.idea)
+        self.assertEqual(invitation.sender, self.owner)
+        self.assertEqual(invitation.receiver, self.receiver)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.PENDING)
+        self.assertGreaterEqual(invitation.timestamp, before)
+        self.assertLessEqual(invitation.timestamp, timezone.now())
+
+    def test_request_can_be_queried_from_idea_sender_and_receiver(self):
+        invitation = self.make_request()
+        invitation.save()
+
+        self.assertEqual(list(self.idea.collaborator_requests.all()), [invitation])
+        self.assertEqual(list(self.owner.sent_collaborator_requests.all()), [invitation])
+        self.assertEqual(
+            list(self.receiver.received_collaborator_requests.all()), [invitation]
+        )
+        self.assertFalse(self.other_student.received_collaborator_requests.exists())
+        self.assertFalse(self.other_student.sent_collaborator_requests.exists())
+
+    def test_supported_statuses_persist_without_automatically_adding_a_member(self):
+        for status in CollaboratorRequest.Status.values:
+            with self.subTest(status=status):
+                idea = Idea.objects.create(
+                    title=f"Project with {status} request",
+                    description="A project seeking collaborators.",
+                    owner=self.owner,
+                )
+                invitation = self.make_request(idea=idea, status=status)
+                invitation.full_clean()
+                invitation.save()
+                invitation.refresh_from_db()
+
+                self.assertEqual(invitation.status, status)
+                self.assertFalse(idea.collaborators.exists())
+                self.assertFalse(Collaborator.objects.filter(idea=idea).exists())
+
+    def test_invalid_status_fails_model_validation(self):
+        invitation = self.make_request(status="unknown")
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("status", caught.exception.message_dict)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_database_rejects_invalid_status_without_model_validation(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make_request(status="unknown").save()
+
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_student_who_does_not_own_the_project_cannot_be_the_sender(self):
+        invitation = self.make_request(sender=self.other_student)
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("sender", caught.exception.message_dict)
+
+    def test_investor_cannot_be_sender_even_if_they_own_the_idea(self):
+        idea = Idea.objects.create(
+            title="Invalid investor-owned project",
+            description="An intentionally invalid ownership fixture.",
+            owner=self.investor,
+        )
+        invitation = self.make_request(idea=idea, sender=self.investor)
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("sender", caught.exception.message_dict)
+
+    def test_investor_cannot_be_the_receiver(self):
+        invitation = self.make_request(receiver=self.investor)
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("receiver", caught.exception.message_dict)
+
+    def test_self_invitation_fails_model_validation(self):
+        invitation = self.make_request(receiver=self.owner)
+
+        with self.assertRaises(ValidationError) as caught:
+            invitation.full_clean()
+
+        self.assertIn("receiver", caught.exception.message_dict)
+
+    def test_database_rejects_self_invitation_without_model_validation(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make_request(receiver=self.owner).save()
+
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_missing_foreign_keys_produce_validation_errors(self):
+        with self.assertRaises(ValidationError) as caught:
+            CollaboratorRequest().full_clean()
+
+        for field in ("idea", "sender", "receiver"):
+            self.assertIn(field, caught.exception.message_dict)
+
+    def test_nonexistent_foreign_keys_produce_validation_errors(self):
+        missing_id = max(self.idea.pk, self.investor.pk) + 100
+        for field in ("idea", "sender", "receiver"):
+            with self.subTest(field=field):
+                invitation = self.make_request()
+                setattr(invitation, f"{field}_id", missing_id)
+
+                with self.assertRaises(ValidationError) as caught:
+                    invitation.full_clean()
+
+                self.assertIn(field, caught.exception.message_dict)
+
+    def test_duplicate_request_is_rejected_for_every_existing_status(self):
+        for status in CollaboratorRequest.Status.values:
+            with self.subTest(status=status):
+                idea = Idea.objects.create(
+                    title=f"Project with {status} invitation",
+                    description="A project seeking collaborators.",
+                    owner=self.owner,
+                )
+                original = self.make_request(idea=idea, status=status)
+                original.save()
+                duplicate = self.make_request(idea=idea)
+
+                with self.assertRaises(ValidationError):
+                    duplicate.full_clean()
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    duplicate.save()
+
+                original.refresh_from_db()
+                self.assertEqual(original.status, status)
+                self.assertEqual(list(idea.collaborator_requests.all()), [original])
+
+    def test_different_project_or_receiver_can_have_separate_requests(self):
+        other_idea = Idea.objects.create(
+            title="Study planner",
+            description="Plan exams together.",
+            owner=self.owner,
+        )
+        pairs = (
+            (self.idea, self.receiver),
+            (self.idea, self.other_student),
+            (other_idea, self.receiver),
+        )
+
+        for idea, receiver in pairs:
+            invitation = self.make_request(idea=idea, receiver=receiver)
+            invitation.full_clean()
+            invitation.save()
+
+        self.assertEqual(CollaboratorRequest.objects.count(), 3)
+        self.assertEqual(self.receiver.received_collaborator_requests.count(), 2)
+        self.assertEqual(self.other_student.received_collaborator_requests.count(), 1)
+
+    def test_deleting_project_removes_memberships_and_requests_but_keeps_users(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.receiver
+        )
+        invitation = self.make_request()
+        invitation.save()
+
+        self.idea.delete()
+
+        self.assertFalse(Collaborator.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(CollaboratorRequest.objects.filter(pk=invitation.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.owner.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.receiver.pk).exists())
+
+    def test_deleting_receiver_removes_their_membership_and_request_only(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.receiver
+        )
+        invitation = self.make_request()
+        invitation.save()
+        other_invitation = self.make_request(receiver=self.other_student)
+        other_invitation.save()
+
+        self.receiver.delete()
+
+        self.assertFalse(Collaborator.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(CollaboratorRequest.objects.filter(pk=invitation.pk).exists())
+        self.assertTrue(Idea.objects.filter(pk=self.idea.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.owner.pk).exists())
+        self.assertTrue(
+            CollaboratorRequest.objects.filter(pk=other_invitation.pk).exists()
+        )
+
+    def test_deleting_sender_removes_owned_project_and_its_collaboration_records(self):
+        membership = Collaborator.objects.create(
+            idea=self.idea, collaborator=self.receiver
+        )
+        invitation = self.make_request()
+        invitation.save()
+
+        self.owner.delete()
+
+        self.assertFalse(Idea.objects.filter(pk=self.idea.pk).exists())
+        self.assertFalse(Collaborator.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(CollaboratorRequest.objects.filter(pk=invitation.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.receiver.pk).exists())
 
 
 class FeedbackModelTests(TestCase):
@@ -357,10 +903,573 @@ class FeedbackModelTests(TestCase):
 
         self.assertFalse(Feedback.objects.filter(pk=feedback.pk).exists())
 
+class CollaboratorRequestFormTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("request-form-owner@example.com")
+        cls.other_student = create_student("request-form-other@example.com")
+        cls.no_projects_student = create_student("request-form-no-projects@example.com")
+        cls.first_idea = Idea.objects.create(
+            title="Zebra project",
+            description="A project seeking collaborators.",
+            owner=cls.owner,
+        )
+        cls.second_idea = Idea.objects.create(
+            title="Alpha project",
+            description="Another project seeking collaborators.",
+            owner=cls.owner,
+        )
+        cls.foreign_idea = Idea.objects.create(
+            title="Another student's project",
+            description="A project owned by somebody else.",
+            owner=cls.other_student,
+        )
+
+    def test_selector_contains_only_owners_projects_in_stable_order(self):
+        form = CollaboratorRequestForm(owner=self.owner)
+
+        self.assertEqual(
+            list(form.fields["idea"].queryset), [self.second_idea, self.first_idea]
+        )
+
+    def test_valid_selection_returns_the_idea_without_creating_a_request(self):
+        form = CollaboratorRequestForm(
+            {"idea": str(self.first_idea.pk)}, owner=self.owner
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["idea"], self.first_idea)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_missing_or_empty_project_shows_required_error(self):
+        for data in ({}, {"idea": ""}, {"idea": None}):
+            with self.subTest(data=data):
+                form = CollaboratorRequestForm(data, owner=self.owner)
+
+                self.assertFalse(form.is_valid())
+                self.assertEqual(
+                    form.errors["idea"], ["Please select one of your published projects."]
+                )
+
+    def test_malformed_or_nonexistent_project_shows_invalid_choice_error(self):
+        missing_id = self.foreign_idea.pk + 100
+        for value in ("not-an-id", "-1", str(missing_id), "9" * 100):
+            with self.subTest(value=value):
+                form = CollaboratorRequestForm({"idea": value}, owner=self.owner)
+
+                self.assertFalse(form.is_valid())
+                self.assertEqual(
+                    form.errors["idea"], ["Select one of your own published projects."]
+                )
+
+    def test_posted_owner_cannot_make_another_students_project_selectable(self):
+        form = CollaboratorRequestForm(
+            {"idea": self.foreign_idea.pk, "owner": self.other_student.pk},
+            owner=self.owner,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("idea", form.errors)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_student_without_projects_has_no_valid_selection(self):
+        form = CollaboratorRequestForm(
+            {"idea": self.first_idea.pk}, owner=self.no_projects_student
+        )
+
+        self.assertFalse(form.fields["idea"].queryset.exists())
+        self.assertFalse(form.is_valid())
+        self.assertIn("idea", form.errors)
+
+    def test_investor_cannot_select_an_idea_even_with_invalid_ownership_data(self):
+        investor = User.objects.create_user(
+            email="request-form-investor@example.com",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        idea = Idea.objects.create(
+            title="Invalid investor-owned project",
+            description="An intentionally invalid ownership fixture.",
+            owner=investor,
+        )
+        form = CollaboratorRequestForm({"idea": idea.pk}, owner=investor)
+
+        self.assertFalse(form.fields["idea"].queryset.exists())
+        self.assertFalse(form.is_valid())
+        self.assertIn("idea", form.errors)
+
+    def test_anonymous_user_has_no_valid_selection(self):
+        form = CollaboratorRequestForm(
+            {"idea": self.first_idea.pk}, owner=AnonymousUser()
+        )
+
+        self.assertFalse(form.fields["idea"].queryset.exists())
+        self.assertFalse(form.is_valid())
+        self.assertIn("idea", form.errors)
+
+
+class SendCollaboratorRequestTests(TestCase):
+    duplicate_message = (
+        "You have already sent a collaborator request to this student for this project."
+    )
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("send-request-owner@example.com")
+        cls.receiver = create_student("send-request-receiver@example.com")
+        cls.other_student = create_student("send-request-other@example.com")
+        cls.investor = User.objects.create_user(
+            email="send-request-investor@example.com",
+            name="Test Investor",
+            role=User.Role.INVESTOR,
+        )
+        cls.inactive = User.objects.create_user(
+            email="send-request-inactive@example.com",
+            name="Inactive Student",
+            role=User.Role.STUDENT,
+            is_active=False,
+        )
+        cls.idea = Idea.objects.create(
+            title="Campus collaboration project",
+            description="A project seeking collaborators.",
+            owner=cls.owner,
+        )
+        cls.foreign_idea = Idea.objects.create(
+            title="Another owner's project",
+            description="A project owned by somebody else.",
+            owner=cls.other_student,
+        )
+
+    def setUp(self):
+        self.url = reverse("ideas:send_collaborator_request", args=[self.receiver.pk])
+        self.profile_url = reverse(
+            "accounts:collaborator_profile", args=[self.receiver.pk]
+        )
+        self.client.force_login(self.owner)
+
+    def test_valid_request_is_saved_for_receiver_and_confirms_success(self):
+        before = timezone.now()
+
+        response = self.client.post(self.url, {"idea": self.idea.pk}, follow=True)
+
+        self.assertEqual(response.redirect_chain, [(self.profile_url, 302)])
+        self.assertContains(response, "Your collaborator request has been sent.")
+        invitation = CollaboratorRequest.objects.get()
+        self.assertEqual(invitation.idea, self.idea)
+        self.assertEqual(invitation.sender, self.owner)
+        self.assertEqual(invitation.receiver, self.receiver)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.PENDING)
+        self.assertGreaterEqual(invitation.timestamp, before)
+        self.assertEqual(
+            list(self.receiver.received_collaborator_requests.all()), [invitation]
+        )
+        self.assertFalse(Collaborator.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_missing_project_returns_bound_form_error_without_saving(self):
+        response = self.client.post(self.url, {})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["student"], self.receiver)
+        form = response.context["collaborator_request_form"]
+        self.assertTrue(form.is_bound)
+        self.assertIn("idea", form.errors)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_malformed_empty_or_nonexistent_project_is_rejected(self):
+        for value in ("", "not-an-id", "-1", "999999", "9" * 100):
+            with self.subTest(value=value):
+                response = self.client.post(self.url, {"idea": value})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("idea", response.context["collaborator_request_form"].errors)
+                self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_another_owners_project_is_rejected(self):
+        response = self.client.post(self.url, {"idea": self.foreign_idea.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("idea", response.context["collaborator_request_form"].errors)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_anonymous_sender_is_asked_to_sign_in(self):
+        self.client.logout()
+
+        self.assertRedirects(
+            self.client.post(self.url, {"idea": self.idea.pk}),
+            f"{reverse('accounts:login')}?next={self.url}",
+        )
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_investor_cannot_send_a_request(self):
+        self.client.force_login(self.investor)
+
+        response = self.client.post(self.url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_self_invitation_is_rejected(self):
+        url = reverse("ideas:send_collaborator_request", args=[self.owner.pk])
+
+        self.assertEqual(self.client.post(url, {"idea": self.idea.pk}).status_code, 403)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_nonstudent_inactive_and_missing_receivers_are_not_found(self):
+        for student_id in (self.investor.pk, self.inactive.pk, self.inactive.pk + 100):
+            with self.subTest(student_id=student_id):
+                url = reverse("ideas:send_collaborator_request", args=[student_id])
+                response = self.client.post(url, {"idea": self.idea.pk})
+                self.assertEqual(response.status_code, 404)
+                self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_student_without_projects_cannot_send_using_someone_elses_project(self):
+        self.client.force_login(self.receiver)
+        url = reverse("ideas:send_collaborator_request", args=[self.other_student.pk])
+
+        response = self.client.post(url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["has_owned_ideas"])
+        self.assertIn("idea", response.context["collaborator_request_form"].errors)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_non_post_methods_do_not_create_records(self):
+        for method in ("GET", "PUT", "PATCH", "DELETE"):
+            with self.subTest(method=method):
+                self.assertEqual(self.client.generic(method, self.url).status_code, 405)
+
+        self.assertFalse(CollaboratorRequest.objects.exists())
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_request_requires_a_csrf_token(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.owner)
+
+        response = csrf_client.post(self.url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+    def test_request_with_a_valid_csrf_token_is_accepted(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.owner)
+        csrf_client.get(self.profile_url)
+        token = csrf_client.cookies["csrftoken"].value
+
+        response = csrf_client.post(
+            self.url, {"idea": self.idea.pk}, HTTP_X_CSRFTOKEN=token
+        )
+
+        self.assertRedirects(response, self.profile_url)
+        self.assertEqual(CollaboratorRequest.objects.count(), 1)
+
+    def test_extra_identity_and_status_fields_cannot_override_server_values(self):
+        response = self.client.post(self.url, {
+            "idea": self.idea.pk,
+            "sender": self.investor.pk,
+            "receiver": self.owner.pk,
+            "status": CollaboratorRequest.Status.ACCEPTED,
+        })
+
+        self.assertRedirects(response, self.profile_url)
+        invitation = CollaboratorRequest.objects.get()
+        self.assertEqual(invitation.sender, self.owner)
+        self.assertEqual(invitation.receiver, self.receiver)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.PENDING)
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_duplicate_requests_preserve_original_status_and_timestamp(self):
+        for status in CollaboratorRequest.Status.values:
+            with self.subTest(status=status):
+                idea = Idea.objects.create(
+                    title=f"Project with {status} request",
+                    description="A project seeking collaborators.",
+                    owner=self.owner,
+                )
+                original = CollaboratorRequest.objects.create(
+                    idea=idea, sender=self.owner, receiver=self.receiver, status=status
+                )
+                original_timestamp = original.timestamp
+
+                response = self.client.post(self.url, {"idea": idea.pk})
+
+                self.assertEqual(response.status_code, 200)
+                form = response.context["collaborator_request_form"]
+                self.assertIn(self.duplicate_message, form.non_field_errors())
+                self.assertEqual(form["idea"].value(), str(idea.pk))
+                self.assertEqual(list(idea.collaborator_requests.all()), [original])
+                original.refresh_from_db()
+                self.assertEqual(original.status, status)
+                self.assertEqual(original.timestamp, original_timestamp)
+        self.assertFalse(Collaborator.objects.exists())
+
+    def test_same_receiver_can_be_invited_for_different_owned_projects(self):
+        second_idea = Idea.objects.create(
+            title="Another owned project",
+            description="A different project seeking collaborators.",
+            owner=self.owner,
+        )
+
+        for idea in (self.idea, second_idea):
+            self.assertRedirects(
+                self.client.post(self.url, {"idea": idea.pk}), self.profile_url
+            )
+
+        self.assertEqual(self.receiver.received_collaborator_requests.count(), 2)
+
+    def test_same_project_can_have_requests_for_different_receivers(self):
+        for receiver in (self.receiver, self.other_student):
+            url = reverse("ideas:send_collaborator_request", args=[receiver.pk])
+            response = self.client.post(url, {"idea": self.idea.pk})
+            self.assertRedirects(
+                response, reverse("accounts:collaborator_profile", args=[receiver.pk])
+            )
+
+        self.assertEqual(self.idea.collaborator_requests.count(), 2)
+
+    def test_concurrent_winner_result_preserves_the_existing_request(self):
+        winners = []
+
+        def another_submission_won(*, idea, receiver, defaults):
+            invitation = CollaboratorRequest.objects.create(
+                idea=idea,
+                receiver=receiver,
+                sender=defaults["sender"],
+                status=CollaboratorRequest.Status.REJECTED,
+            )
+            winners.append(invitation)
+            return invitation, False
+
+        with patch(
+            "ideas.views.CollaboratorRequest.objects.get_or_create",
+            side_effect=another_submission_won,
+        ):
+            response = self.client.post(self.url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            self.duplicate_message,
+            response.context["collaborator_request_form"].non_field_errors(),
+        )
+        invitation = CollaboratorRequest.objects.get()
+        self.assertEqual(invitation.pk, winners[0].pk)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.REJECTED)
+        self.assertEqual(invitation.timestamp, winners[0].timestamp)
+
+    def test_model_validation_errors_are_returned_without_saving(self):
+        with patch(
+            "ideas.views.CollaboratorRequest.full_clean",
+            side_effect=ValidationError({"sender": "The sender is no longer eligible."}),
+        ):
+            response = self.client.post(self.url, {"idea": self.idea.pk})
+
+        self.assertEqual(response.status_code, 200)
+        form = response.context["collaborator_request_form"]
+        self.assertIn("The sender is no longer eligible.", form.non_field_errors())
+        self.assertEqual(form["idea"].value(), str(self.idea.pk))
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+
+class CollaboratorRequestWorkflowTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = create_student("request-workflow-owner@example.com")
+        cls.receiver = create_student("request-workflow-receiver@example.com")
+        cls.idea = Idea.objects.create(
+            title="Workflow campus project",
+            description="A project seeking collaborators.",
+            owner=cls.owner,
+        )
+        cls.foreign_idea = Idea.objects.create(
+            title="Receiver's own project",
+            description="A project the sender does not own.",
+            owner=cls.receiver,
+        )
+        # Directory entries require a saved profile.
+        from accounts.models import StudentProfile
+
+        StudentProfile.objects.create(user=cls.receiver, bio="I build student tools.")
+
+    def setUp(self):
+        self.client = Client(enforce_csrf_checks=True)
+        self.client.force_login(self.owner)
+        self.profile_url = reverse(
+            "accounts:collaborator_profile", args=[self.receiver.pk]
+        )
+
+    def open_request_form(self):
+        directory = self.client.get(reverse("accounts:student_discovery"))
+        self.assertContains(directory, f'href="{self.profile_url}"')
+        response = self.client.get(self.profile_url)
+        match = re.search(
+            r'<form\b[^>]*id="collaborator-request-form"[^>]*>.*?</form>',
+            response.content.decode(),
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        html = match.group(0)
+        action = re.search(r'\baction="([^"]+)"', html).group(1)
+        token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', html).group(1)
+        return action, token
+
+    def test_owner_submits_the_rendered_form_and_receiver_has_the_pending_request(self):
+        action, token = self.open_request_form()
+
+        response = self.client.post(action, {
+            "idea": self.idea.pk, "csrfmiddlewaretoken": token,
+        }, follow=True)
+
+        self.assertEqual(response.redirect_chain, [(self.profile_url, 302)])
+        self.assertContains(response, "Your collaborator request has been sent.")
+        invitation = self.receiver.received_collaborator_requests.get()
+        self.assertEqual(invitation.idea, self.idea)
+        self.assertEqual(invitation.sender, self.owner)
+        self.assertEqual(invitation.status, CollaboratorRequest.Status.PENDING)
+        self.assertFalse(Collaborator.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_missing_selection_shows_error_and_can_be_corrected(self):
+        action, token = self.open_request_form()
+
+        invalid = self.client.post(action, {"csrfmiddlewaretoken": token})
+
+        self.assertContains(invalid, "Please select one of your published projects.")
+        self.assertContains(invalid, 'id="collaborator-request-form"')
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+        corrected = self.client.post(action, {
+            "idea": self.idea.pk, "csrfmiddlewaretoken": token,
+        }, follow=True)
+
+        self.assertContains(corrected, "Your collaborator request has been sent.")
+        self.assertEqual(CollaboratorRequest.objects.count(), 1)
+
+    def test_repeated_form_submission_shows_error_and_preserves_original_request(self):
+        action, token = self.open_request_form()
+        data = {"idea": self.idea.pk, "csrfmiddlewaretoken": token}
+        self.assertRedirects(self.client.post(action, data), self.profile_url)
+        original = CollaboratorRequest.objects.get()
+        original_timestamp = original.timestamp
+
+        duplicate = self.client.post(action, data)
+
+        self.assertContains(
+            duplicate,
+            "You have already sent a collaborator request to this student for this project.",
+        )
+        self.assertContains(duplicate, f'value="{self.idea.pk}" selected')
+        self.assertEqual(list(CollaboratorRequest.objects.all()), [original])
+        original.refresh_from_db()
+        self.assertEqual(original.status, CollaboratorRequest.Status.PENDING)
+        self.assertEqual(original.timestamp, original_timestamp)
+
+    def test_foreign_project_cannot_be_submitted_through_the_rendered_form(self):
+        action, token = self.open_request_form()
+
+        response = self.client.post(action, {
+            "idea": self.foreign_idea.pk, "csrfmiddlewaretoken": token,
+        })
+
+        self.assertContains(response, "Select one of your own published projects.")
+        self.assertContains(response, "I build student tools.")
+        self.assertFalse(CollaboratorRequest.objects.exists())
+
+
 class IdeaFormTests(TestCase):
     def test_valid_form_without_category(self):
         form = IdeaForm({"title": "My idea", "description": "Something useful."})
         self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["development_stage"], "")
+        self.assertEqual(form.cleaned_data["required_support"], [])
+
+    def test_form_saves_updates_and_reloads_stage_and_support_selections(self):
+        idea = Idea(owner=create_student("form-project-owner@example.com"))
+        for stage, support in (
+            ("prototype", ["funding", "technical_support"]),
+            ("launched", ["mentoring", "marketing", "team_members"]),
+        ):
+            with self.subTest(stage=stage, support=support):
+                form = IdeaForm(
+                    {
+                        "title": "Project needs",
+                        "description": "A project seeking help.",
+                        "development_stage": stage,
+                        "required_support": support,
+                    },
+                    instance=idea,
+                )
+                self.assertTrue(form.is_valid(), form.errors)
+                idea = form.save()
+                idea.refresh_from_db()
+                self.assertEqual(idea.development_stage, stage)
+                self.assertEqual(idea.required_support, support)
+                reopened = IdeaForm(instance=idea)
+                self.assertEqual(reopened["development_stage"].value(), stage)
+                self.assertEqual(reopened["required_support"].value(), support)
+
+    def test_form_reports_invalid_stage_and_support_selections(self):
+        for field, value in (
+            ("development_stage", "unknown"),
+            ("required_support", ["unknown"]),
+            ("required_support", ["funding", "funding"]),
+        ):
+            with self.subTest(field=field, value=value):
+                form = IdeaForm({
+                    "title": "Invalid selection",
+                    "description": "A project with an invalid selection.",
+                    field: value,
+                })
+                self.assertFalse(form.is_valid())
+                self.assertIn(field, form.errors)
+
+    def test_blank_stage_and_unselected_support_clear_existing_values(self):
+        idea = Idea.objects.create(
+            title="Original project",
+            description="A project with saved needs.",
+            owner=create_student("clear-project-needs@example.com"),
+            development_stage="mvp",
+            required_support=["funding", "technical_support"],
+        )
+        # Browsers omit the support key when no checkboxes are selected.
+        form = IdeaForm(
+            {
+                "title": idea.title,
+                "description": idea.description,
+                "development_stage": "",
+            },
+            instance=idea,
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "")
+        self.assertEqual(idea.required_support, [])
+
+    def test_owner_and_system_fields_cannot_be_changed_through_form(self):
+        owner = create_student("protected-project-owner@example.com")
+        other = create_student("other-project-owner@example.com")
+        idea = Idea.objects.create(
+            title="Original project", description="Original description.",
+            owner=owner, demo_key="protected-project",
+        )
+        published_at = idea.published_at
+        form = IdeaForm(
+            {
+                "title": "Updated project",
+                "description": "Updated description.",
+                "owner": str(other.pk),
+                "published_at": "2000-01-01T00:00:00Z",
+                "demo_key": "changed-key",
+            },
+            instance=idea,
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+        idea.refresh_from_db()
+        self.assertEqual(idea.owner_id, owner.pk)
+        self.assertEqual(idea.published_at, published_at)
+        self.assertEqual(idea.demo_key, "protected-project")
 
     def test_title_is_required(self):
         form = IdeaForm({"title": "", "description": "Something useful."})
@@ -378,7 +1487,9 @@ class IdeaFormTests(TestCase):
         self.assertEqual(set(form.errors), {"title", "description"})
 
     def test_fields_follow_the_wireframe_order(self):
-        self.assertEqual(list(IdeaForm().fields), ["title", "description", "category"])
+        self.assertEqual(list(IdeaForm().fields), [
+            "title", "description", "category", "development_stage", "required_support",
+        ])
 
 
 class PublishIdeaAccessTests(TestCase):
@@ -458,6 +1569,68 @@ class SubmitIdeaTests(TestCase):
             {"title": "Mine", "description": "Mine.", "owner": other.pk},
         )
         self.assertEqual(Idea.objects.get().owner, self.student)
+
+    def test_publication_notifies_following_investors_only(self):
+        follower = User.objects.create_user(
+            email="follower@example.com",
+            password="A-valid-password-123!",
+            name="Following Investor",
+            role=User.Role.INVESTOR,
+        )
+        non_follower = User.objects.create_user(
+            email="non-follower@example.com",
+            password="A-valid-password-123!",
+            name="Other Investor",
+            role=User.Role.INVESTOR,
+        )
+        Follow.objects.create(investor=follower, student=self.student)
+
+        self.client.post(
+            self.url, {"title": "Campus bikes", "description": "Share bikes."}
+        )
+
+        notification = Notification.objects.get()
+        idea = Idea.objects.get()
+        self.assertEqual(notification.type, Notification.Type.IDEA_PUBLISHED)
+        self.assertEqual(notification.idea, idea)
+        self.assertEqual(notification.recipient, follower)
+        self.assertFalse(Notification.objects.filter(recipient=self.student).exists())
+        self.assertFalse(Notification.objects.filter(recipient=non_follower).exists())
+
+    def test_invalid_publication_does_not_notify_followers(self):
+        follower = User.objects.create_user(
+            email="invalid-follower@example.com",
+            password="A-valid-password-123!",
+            name="Following Investor",
+            role=User.Role.INVESTOR,
+        )
+        Follow.objects.create(investor=follower, student=self.student)
+
+        response = self.client.post(self.url, {"title": "", "description": ""})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Idea.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_editing_an_idea_does_not_create_publication_notifications(self):
+        follower = User.objects.create_user(
+            email="edit-follower@example.com",
+            password="A-valid-password-123!",
+            name="Following Investor",
+            role=User.Role.INVESTOR,
+        )
+        Follow.objects.create(investor=follower, student=self.student)
+        idea = Idea.objects.create(
+            title="Original", description="Original description", owner=self.student
+        )
+
+        response = self.client.post(
+            reverse("ideas:edit", args=[idea.pk]),
+            {"title": "Updated", "description": "Updated description"},
+        )
+
+        self.assertRedirects(response, reverse("ideas:home"))
+        self.assertFalse(Notification.objects.exists())
 
 
 class EditIdeaTests(TestCase):
@@ -544,6 +1717,140 @@ class EditIdeaTests(TestCase):
                 self.assertEqual(self.idea.description, "Original description")
 
 
+class ProjectStageSupportWorkflowTests(TestCase):
+    def setUp(self):
+        self.owner = create_student("project-needs-owner@example.com")
+        self.category = Category.objects.get(name="Technology")
+        self.publish_url = reverse("ideas:publish")
+        self.client.force_login(self.owner)
+
+    def payload(self, **overrides):
+        data = {
+            "title": "Project seeking support",
+            "description": "A project with stage and support needs.",
+            "category": str(self.category.pk),
+            "development_stage": "prototype",
+            "required_support": ["funding", "technical_support"],
+        }
+        data.update(overrides)
+        return data
+
+    def existing_project(self):
+        return Idea.objects.create(
+            title="Original project", description="Original description.",
+            owner=self.owner, category=self.category,
+            development_stage="mvp", required_support=["mentoring"],
+        )
+
+    def test_create_update_clear_and_reopen_project_needs(self):
+        response = self.client.post(self.publish_url, self.payload())
+        self.assertRedirects(response, reverse("ideas:home"))
+        idea = Idea.objects.get(owner=self.owner)
+        self.assertEqual(idea.development_stage, "prototype")
+        self.assertEqual(idea.required_support, ["funding", "technical_support"])
+        edit_url = reverse("ideas:edit", args=[idea.pk])
+        response = self.client.get(edit_url)
+        self.assertEqual(response.context["form"]["development_stage"].value(), "prototype")
+        self.assertEqual(response.context["form"]["required_support"].value(), ["funding", "technical_support"])
+
+        response = self.client.post(edit_url, self.payload(
+            development_stage="growth", required_support=["marketing", "team_members"],
+        ))
+        self.assertRedirects(response, reverse("ideas:home"))
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "growth")
+        self.assertEqual(idea.required_support, ["marketing", "team_members"])
+        response = self.client.get(edit_url)
+        self.assertEqual(response.context["form"]["development_stage"].value(), "growth")
+        self.assertEqual(response.context["form"]["required_support"].value(), ["marketing", "team_members"])
+
+        cleared = self.payload(development_stage="")
+        # An unchecked checkbox group is absent from the browser submission.
+        cleared.pop("required_support")
+        response = self.client.post(edit_url, cleared)
+        self.assertRedirects(response, reverse("ideas:home"))
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "")
+        self.assertEqual(idea.required_support, [])
+        response = self.client.get(edit_url)
+        self.assertEqual(response.context["form"]["development_stage"].value(), "")
+        self.assertEqual(response.context["form"]["required_support"].value(), [])
+        self.assertEqual(idea.owner_id, self.owner.pk)
+        self.assertEqual(Idea.objects.count(), 1)
+
+    def test_invalid_metadata_does_not_publish_a_project(self):
+        for field, value in (
+            ("development_stage", "unknown"),
+            ("required_support", ["unknown"]),
+            ("required_support", ["funding", "funding"]),
+        ):
+            with self.subTest(field=field, value=value):
+                response = self.client.post(self.publish_url, self.payload(**{field: value}))
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(field, response.context["form"].errors)
+                self.assertFalse(Idea.objects.exists())
+
+    def test_invalid_metadata_does_not_change_an_existing_project(self):
+        idea = self.existing_project()
+        edit_url = reverse("ideas:edit", args=[idea.pk])
+        for field, value in (
+            ("development_stage", "unknown"),
+            ("required_support", ["unknown"]),
+            ("required_support", ["funding", "funding"]),
+        ):
+            with self.subTest(field=field, value=value):
+                response = self.client.post(edit_url, self.payload(**{field: value}))
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(field, response.context["form"].errors)
+                idea.refresh_from_db()
+                self.assertEqual(idea.title, "Original project")
+                self.assertEqual(idea.description, "Original description.")
+                self.assertEqual(idea.development_stage, "mvp")
+                self.assertEqual(idea.required_support, ["mentoring"])
+                self.assertEqual(idea.category_id, self.category.pk)
+                self.assertEqual(idea.owner_id, self.owner.pk)
+
+    def test_other_students_and_investors_cannot_change_project_needs(self):
+        idea = self.existing_project()
+        other = create_student("project-needs-other@example.com")
+        investor = User.objects.create_user(
+            email="project-needs-no-edit@example.com", name="Investor",
+            password="Project-needs-password-123!", role=User.Role.INVESTOR,
+        )
+        for viewer in (other, investor):
+            with self.subTest(role=viewer.role):
+                self.client.force_login(viewer)
+                response = self.client.post(
+                    reverse("ideas:edit", args=[idea.pk]), self.payload(),
+                )
+                self.assertEqual(response.status_code, 403)
+                idea.refresh_from_db()
+                self.assertEqual(idea.title, "Original project")
+                self.assertEqual(idea.development_stage, "mvp")
+                self.assertEqual(idea.required_support, ["mentoring"])
+                self.assertEqual(idea.owner_id, self.owner.pk)
+
+    def test_anonymous_and_investor_submissions_cannot_create_projects(self):
+        idea = self.existing_project()
+        self.client.logout()
+        for url in (self.publish_url, reverse("ideas:edit", args=[idea.pk])):
+            with self.subTest(url=url):
+                response = self.client.post(url, self.payload())
+                self.assertEqual(response.status_code, 302)
+                self.assertTrue(response.url.startswith(reverse("accounts:login")))
+
+        investor = User.objects.create_user(
+            email="project-needs-no-publish@example.com", name="Investor",
+            password="Project-needs-password-123!", role=User.Role.INVESTOR,
+        )
+        self.client.force_login(investor)
+        self.assertEqual(self.client.post(self.publish_url, self.payload()).status_code, 403)
+        self.assertEqual(Idea.objects.count(), 1)
+        idea.refresh_from_db()
+        self.assertEqual(idea.development_stage, "mvp")
+        self.assertEqual(idea.required_support, ["mentoring"])
+
+
 class RequireEssentialInformationTests(TestCase):
     """Criterion: Require essential information (US001, #4)."""
 
@@ -581,6 +1888,16 @@ class RequireEssentialInformationTests(TestCase):
 
 
 class IdeaFormPageTests(TestCase):
+    def assertSupportChecked(self, response, expected):
+        controls = re.findall(
+            r'<input\b[^>]*\bname="required_support"[^>]*>', response.content.decode()
+        )
+        checked = {
+            re.search(r'\bvalue="([^"]+)"', control).group(1)
+            for control in controls if re.search(r'\bchecked(?:\s|=|>)', control)
+        }
+        self.assertEqual(checked, set(expected))
+
     def test_form_follows_the_wireframe(self):
         self.client.force_login(create_student())
         html = self.client.get(reverse("ideas:publish")).content.decode()
@@ -590,10 +1907,80 @@ class IdeaFormPageTests(TestCase):
             html.index('name="title"'),
             html.index('name="description"'),
             html.index('name="category"'),
+            html.index('name="development_stage"'),
+            html.index('name="required_support"'),
             html.index(">Publish</button>"),
         ]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("Technology", html)
+
+    def test_create_and_edit_pages_offer_stage_and_support_options(self):
+        owner = create_student()
+        self.client.force_login(owner)
+        idea = Idea.objects.create(
+            title="Project options", description="An existing project.", owner=owner,
+        )
+        for url in (reverse("ideas:publish"), reverse("ideas:edit", args=[idea.pk])):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'name="development_stage"')
+                self.assertContains(response, 'name="required_support"', count=5)
+                self.assertContains(response, 'type="checkbox"', count=5)
+                self.assertContains(response, '<legend class="form-label">')
+                self.assertContains(response, 'id="id_required_support_helptext"')
+                for stage, label in Idea.DevelopmentStage.choices:
+                    self.assertContains(response, f'<option value="{stage}">{label}</option>', html=True)
+                for label in Idea.SupportType.labels:
+                    self.assertContains(response, label)
+
+    def test_edit_page_preselects_saved_stage_and_support(self):
+        owner = create_student()
+        idea = Idea.objects.create(
+            title="Saved needs", description="A project seeking help.", owner=owner,
+            development_stage="mvp", required_support=["funding", "technical_support"],
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get(reverse("ideas:edit", args=[idea.pk]))
+
+        self.assertContains(response, '<option value="mvp" selected>MVP</option>', html=True)
+        self.assertSupportChecked(response, {"funding", "technical_support"})
+
+    def test_invalid_create_and_edit_pages_show_errors_and_keep_valid_selections(self):
+        owner = create_student()
+        idea = Idea.objects.create(
+            title="Original needs", description="Original description.", owner=owner,
+            development_stage="growth", required_support=["mentoring"],
+        )
+        self.client.force_login(owner)
+        for url in (reverse("ideas:publish"), reverse("ideas:edit", args=[idea.pk])):
+            for overrides, error_field, checked in (
+                ({"description": ""}, "description", {"funding", "technical_support"}),
+                ({"development_stage": "unknown"}, "development_stage", {"funding", "technical_support"}),
+                ({"required_support": ["funding", "unknown"]}, "required_support", {"funding"}),
+            ):
+                with self.subTest(url=url, error=error_field):
+                    data = {
+                        "title": "Keep entered title",
+                        "description": "Keep entered description.",
+                        "development_stage": "prototype",
+                        "required_support": ["funding", "technical_support"],
+                    }
+                    data.update(overrides)
+                    response = self.client.post(url, data)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertContains(response, f'id="id_{error_field}_error"')
+                    self.assertContains(response, 'value="Keep entered title"')
+                    self.assertSupportChecked(response, checked)
+                    if error_field != "development_stage":
+                        self.assertContains(response, '<option value="prototype" selected>Prototype</option>', html=True)
+                    idea.refresh_from_db()
+                    self.assertEqual(idea.title, "Original needs")
+                    self.assertEqual(idea.description, "Original description.")
+                    self.assertEqual(idea.development_stage, "growth")
+                    self.assertEqual(idea.required_support, ["mentoring"])
+                    self.assertEqual(Idea.objects.count(), 1)
 
     def test_students_see_the_publish_link(self):
         self.client.force_login(create_student())
@@ -1143,6 +2530,17 @@ class FeedbackFeatureTests(TestCase):
         )
         self.detail_url = reverse("ideas:detail", args=[self.idea.pk])
 
+    def test_unanswered_feedback_filter_is_shown_only_to_students(self):
+        url = reverse("ideas:notifications")
+
+        self.client.force_login(self.owner)
+        student_response = self.client.get(url)
+        self.assertContains(student_response, "No answered feedback")
+
+        self.client.force_login(self.investor)
+        investor_response = self.client.get(url)
+        self.assertNotContains(investor_response, "No answered feedback")
+
     def test_investor_can_submit_feedback_and_author_is_displayed(self):
         self.client.force_login(self.investor)
         response = self.client.post(
@@ -1227,6 +2625,76 @@ class FeedbackFeatureTests(TestCase):
         notification.refresh_from_db()
         self.assertTrue(notification.is_read)
 
+    def test_investor_can_open_publication_notification_to_idea(self):
+        notification = Notification.objects.create(
+            recipient=self.investor,
+            idea=self.idea,
+            type=Notification.Type.IDEA_PUBLISHED,
+        )
+        self.client.force_login(self.investor)
+
+        response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+
+        self.assertRedirects(response, self.detail_url)
+        notification.refresh_from_db()
+        self.assertTrue(notification.is_read)
+
+        self.client.force_login(self.other_investor)
+        forbidden_response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+        self.assertEqual(forbidden_response.status_code, 404)
+
+    def test_notification_center_displays_all_notification_types(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=self.investor, text="A suggestion."
+        )
+        reply = Reply.objects.create(
+            feedback=feedback, author=self.owner, text="We will consider it."
+        )
+        Notification.objects.create(
+            recipient=self.investor,
+            type=Notification.Type.FEEDBACK_REPLY,
+            reply=reply,
+        )
+        Notification.objects.create(
+            recipient=self.investor,
+            idea=self.idea,
+            type=Notification.Type.IDEA_PUBLISHED,
+        )
+        Notification.objects.create(recipient=self.investor, feedback=feedback)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(reverse("ideas:notifications"))
+
+        self.assertContains(response, 'New idea published: "Feedback idea"')
+        self.assertContains(response, 'A student replied to your feedback on "Feedback idea"')
+        self.assertContains(response, 'New feedback on "Feedback idea"')
+
+    def test_unanswered_filter_excludes_non_feedback_notifications(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=self.investor, text="A suggestion."
+        )
+        publication = Notification.objects.create(
+            recipient=self.owner,
+            idea=self.idea,
+            type=Notification.Type.IDEA_PUBLISHED,
+        )
+        Notification.objects.create(recipient=self.owner, feedback=feedback)
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("ideas:notifications"), {"filter": "unanswered"}
+        )
+
+        self.assertEqual(
+            list(response.context["notification_items"]),
+            [Notification.objects.get(feedback=feedback)],
+        )
+        self.assertNotIn(publication, response.context["notification_items"])
+
     def test_owner_can_remove_notification_without_opening_feedback(self):
         feedback = Feedback.objects.create(
             idea=self.idea,
@@ -1303,7 +2771,23 @@ class FeedbackFeatureTests(TestCase):
                 Notification(recipient=other_owner, feedback=other_feedback),
             ]
         )
+        reply = Reply.objects.create(
+            feedback=feedbacks[0], author=self.owner, text="A student reply."
+        )
+        Notification.objects.create(
+            recipient=self.owner,
+            idea=self.idea,
+            type=Notification.Type.IDEA_PUBLISHED,
+        )
+        Notification.objects.create(
+            recipient=self.owner,
+            reply=reply,
+            type=Notification.Type.FEEDBACK_REPLY,
+        )
         self.client.force_login(self.owner)
+
+        center_response = self.client.get(reverse("ideas:notifications"))
+        self.assertEqual(center_response.context["unread_notification_count"], 4)
 
         response = self.client.post(reverse("ideas:mark-notifications-read"))
 
@@ -1504,6 +2988,11 @@ class FeedbackFeatureTests(TestCase):
         self.assertEqual(reply.author, self.owner)
         self.assertContains(self.client.get(self.detail_url), reply.text)
         self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
+        reply_notification = Notification.objects.get(
+            type=Notification.Type.FEEDBACK_REPLY
+        )
+        self.assertEqual(reply_notification.recipient, self.investor)
+        self.assertEqual(reply_notification.reply, reply)
 
         notification = Notification.objects.create(
             recipient=self.owner,
@@ -1542,6 +3031,72 @@ class FeedbackFeatureTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Please enter a reply.")
         self.assertFalse(Reply.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_each_reply_creates_a_distinct_notification_and_cleanup_preserves_them(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=self.investor, text="Please consider this."
+        )
+        old_notification = Notification.objects.create(
+            recipient=self.owner, feedback=feedback
+        )
+        self.client.force_login(self.owner)
+
+        for reply_text in ("First reply.", "Second reply."):
+            response = self.client.post(
+                reverse("ideas:reply", args=[feedback.pk]), {"text": reply_text}
+            )
+            self.assertRedirects(response, self.detail_url)
+
+        reply_notifications = Notification.objects.filter(
+            recipient=self.investor, type=Notification.Type.FEEDBACK_REPLY
+        )
+        self.assertEqual(reply_notifications.count(), 2)
+        self.assertEqual(
+            set(reply_notifications.values_list("reply__text", flat=True)),
+            {"First reply.", "Second reply."},
+        )
+        self.assertFalse(Notification.objects.filter(pk=old_notification.pk).exists())
+
+    def test_reply_does_not_notify_null_or_non_investor_feedback_author(self):
+        non_investor_author = create_student("student-feedback-author@example.com")
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=non_investor_author, text="Student-authored feedback."
+        )
+        feedback_with_deleted_author = Feedback.objects.create(
+            idea=self.idea, author=self.other_investor, text="Former investor feedback."
+        )
+        self.other_investor.delete()
+        feedback_with_deleted_author.refresh_from_db()
+        self.assertIsNone(feedback_with_deleted_author.author)
+        self.client.force_login(self.owner)
+
+        for item in (feedback, feedback_with_deleted_author):
+            self.client.post(
+                reverse("ideas:reply", args=[item.pk]), {"text": "A reply."}
+            )
+
+        self.assertFalse(Notification.objects.filter(type=Notification.Type.FEEDBACK_REPLY).exists())
+
+    def test_reply_notification_opens_feedback_discussion(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=self.investor, text="A suggestion."
+        )
+        reply = Reply.objects.create(
+            feedback=feedback, author=self.owner, text="A reply."
+        )
+        notification = Notification.objects.create(
+            recipient=self.investor,
+            reply=reply,
+            type=Notification.Type.FEEDBACK_REPLY,
+        )
+        self.client.force_login(self.investor)
+
+        response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+
+        self.assertRedirects(response, f"{self.detail_url}#reply-{reply.pk}")
 
     def test_non_owner_cannot_reply_or_change_status(self):
         feedback = Feedback.objects.create(
@@ -1560,3 +3115,106 @@ class FeedbackFeatureTests(TestCase):
             reverse("ideas:feedback-status", args=[feedback.pk])
         )
         self.assertEqual(status_response.status_code, 403)
+
+
+class NotificationTargetConstraintTests(TestCase):
+    def setUp(self):
+        self.owner = create_student("notification-constraint-owner@example.com")
+        self.investor = User.objects.create_user(
+            email="notification-constraint-investor@example.com",
+            password="A-valid-password-123!",
+            name="Constraint Investor",
+            role=User.Role.INVESTOR,
+        )
+        self.idea = Idea.objects.create(
+            title="Constraint idea",
+            description="An idea for notification constraint tests.",
+            owner=self.owner,
+        )
+        self.feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A feedback item.",
+        )
+        self.reply = Reply.objects.create(
+            feedback=self.feedback,
+            author=self.owner,
+            text="A reply.",
+        )
+
+    def test_each_notification_type_accepts_its_matching_target(self):
+        notifications = [
+            Notification.objects.create(
+                recipient=self.owner,
+                type=Notification.Type.FEEDBACK_RECEIVED,
+                feedback=self.feedback,
+            ),
+            Notification.objects.create(
+                recipient=self.investor,
+                type=Notification.Type.IDEA_PUBLISHED,
+                idea=self.idea,
+            ),
+            Notification.objects.create(
+                recipient=self.investor,
+                type=Notification.Type.FEEDBACK_REPLY,
+                reply=self.reply,
+            ),
+        ]
+
+        self.assertEqual(Notification.objects.count(), 3)
+        self.assertEqual(
+            [notification.type for notification in notifications],
+            [
+                Notification.Type.FEEDBACK_RECEIVED,
+                Notification.Type.IDEA_PUBLISHED,
+                Notification.Type.FEEDBACK_REPLY,
+            ],
+        )
+
+    def test_database_rejects_missing_or_mismatched_targets(self):
+        invalid_notifications = [
+            Notification(recipient=self.owner, type=Notification.Type.FEEDBACK_RECEIVED),
+            Notification(
+                recipient=self.owner,
+                type=Notification.Type.FEEDBACK_RECEIVED,
+                feedback=self.feedback,
+                idea=self.idea,
+            ),
+            Notification(recipient=self.investor, type=Notification.Type.IDEA_PUBLISHED),
+            Notification(
+                recipient=self.investor,
+                type=Notification.Type.IDEA_PUBLISHED,
+                idea=self.idea,
+                feedback=self.feedback,
+            ),
+            Notification(recipient=self.investor, type=Notification.Type.FEEDBACK_REPLY),
+            Notification(
+                recipient=self.investor,
+                type=Notification.Type.FEEDBACK_REPLY,
+                reply=self.reply,
+                feedback=self.feedback,
+            ),
+            Notification(
+                recipient=self.investor,
+                type=Notification.Type.FEEDBACK_REPLY,
+                reply=self.reply,
+                idea=self.idea,
+            ),
+        ]
+
+        for notification in invalid_notifications:
+            with self.subTest(type=notification.type):
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        notification.save()
+
+    def test_existing_feedback_notification_shape_remains_valid(self):
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=self.feedback,
+        )
+
+        self.assertEqual(notification.type, Notification.Type.FEEDBACK_RECEIVED)
+        self.assertEqual(notification.feedback, self.feedback)
+        self.assertIsNone(notification.idea)
+        self.assertIsNone(notification.reply)
