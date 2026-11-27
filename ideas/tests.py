@@ -2530,6 +2530,17 @@ class FeedbackFeatureTests(TestCase):
         )
         self.detail_url = reverse("ideas:detail", args=[self.idea.pk])
 
+    def test_unanswered_feedback_filter_is_shown_only_to_students(self):
+        url = reverse("ideas:notifications")
+
+        self.client.force_login(self.owner)
+        student_response = self.client.get(url)
+        self.assertContains(student_response, "No answered feedback")
+
+        self.client.force_login(self.investor)
+        investor_response = self.client.get(url)
+        self.assertNotContains(investor_response, "No answered feedback")
+
     def test_investor_can_submit_feedback_and_author_is_displayed(self):
         self.client.force_login(self.investor)
         response = self.client.post(
