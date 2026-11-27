@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts", "0009_add_profile_social_urls"),
+        ("accounts", "0010_merge_social_and_investor_profiles"),
     ]
 
     operations = [

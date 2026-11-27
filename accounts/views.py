@@ -4,8 +4,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, LogoutView
-from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.validators import URLValidator
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
@@ -20,7 +19,7 @@ from .forms import (
     StudentProfileForm,
 )
 from .models import Follow, ProfileVisit, StudentProfile
-from .profile_entries import present_entries
+from .profile_display import collaborator_profile_context, profile_display_context
 
 User = get_user_model()
 
@@ -107,49 +106,16 @@ def upload_avatar(request):
 
     if request.user.is_student:
         return redirect("accounts:student_profile")
+    if request.user.is_investor:
+        return redirect("accounts:my_investor_profile")
     return redirect("ideas:home")
-
-
-def _profile_display_context(student):
-    profile = (
-        StudentProfile.objects.filter(user=student)
-        .prefetch_related("skills")
-        .first()
-    )
-
-    social_links = []
-    if profile:
-        validate_url = URLValidator(schemes=["http", "https"])
-        for platform, label in (
-            ("instagram", "Instagram"), ("twitter", "Twitter"),
-            ("youtube", "YouTube"), ("github", "GitHub"),
-        ):
-            url = getattr(profile, f"{platform}_url")
-            if not url:
-                continue
-            try:
-                validate_url(url)
-            except ValidationError:
-                continue
-            social_links.append({"platform": platform, "label": label, "url": url})
-
-    return {
-        "student": student,
-        "profile": profile,
-        "social_links": social_links,
-        "skills": profile.skills.all() if profile else [],
-        "portfolio_projects": present_entries(profile.portfolio_projects, "project") if profile else [],
-        "experience_entries": present_entries(profile.experience, "experience") if profile else [],
-    }
-
-
 @require_GET
 @login_required(login_url=reverse_lazy("accounts:login"))
 def my_profile(request):
     if not request.user.is_student:
         raise PermissionDenied
 
-    context = _profile_display_context(request.user)
+    context = profile_display_context(request.user)
     context["is_own_profile"] = True
     context["profile_visit_count"] = request.user.profile_visits.count()
     return render(request, "accounts/student_profile_detail.html", context)
@@ -166,12 +132,32 @@ def investor_profile(request, student_id):
         pk=student_id,
     )
     ProfileVisit.objects.create(student=student, visitor=request.user)
-    context = _profile_display_context(student)
+    context = profile_display_context(student)
     context["is_own_profile"] = False
     context["is_following"] = Follow.objects.filter(
         investor=request.user, student=student
     ).exists()
     return render(request, "accounts/student_profile_detail.html", context)
+
+
+@require_GET
+@login_required(login_url=reverse_lazy("accounts:login"))
+def collaborator_profile(request, student_id):
+    if not request.user.is_student:
+        raise PermissionDenied
+
+    student = get_object_or_404(
+        User.objects.filter(role=User.Role.STUDENT, is_active=True),
+        pk=student_id,
+    )
+    if student.pk == request.user.pk:
+        return redirect("accounts:my_profile")
+
+    return render(
+        request,
+        "accounts/student_profile_detail.html",
+        collaborator_profile_context(request.user, student),
+    )
 
 
 @login_required(login_url=reverse_lazy("accounts:login"))

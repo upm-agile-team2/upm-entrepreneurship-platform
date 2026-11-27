@@ -32,19 +32,28 @@
         <ul class="navbar-nav ms-auto">
           {% block nav_links %}
             {% if user.is_authenticated %}
-              {% if user.is_investor %}
+              {% if user.is_investor or user.is_student %}
                 <li class="nav-item">
                   <a class="nav-link" href="{% url 'accounts:student_discovery' %}"{% if request.resolver_match.view_name == 'accounts:student_discovery' %} aria-current="page"{% endif %}>{% translate "Students" %}</a>
                 </li>
               {% endif %}
               {% if user.is_student %}
                 <li class="nav-item">
+                  <a class="nav-link" href="{% url 'ideas:collaborator_requests' %}"{% if request.resolver_match.view_name == 'ideas:collaborator_requests' %} aria-current="page"{% endif %}>{% translate "Collaborator requests" %}</a>
+                </li>
+                <li class="nav-item">
                   <a class="nav-link nav-action" href="{% url 'ideas:publish' %}">{% translate "Publish an idea" %}</a>
+                </li>
+                <li class="nav-item">
+                  <a class="nav-link" href="{% url 'accounts:investor_discovery' %}"{% if request.resolver_match.view_name == 'accounts:investor_discovery' %} aria-current="page"{% endif %}>{% translate "Investors" %}</a>
                 </li>
                 <li class="nav-item">
                   <a class="nav-link" href="{% url 'accounts:my_profile' %}">{% translate "My profile" %}</a>
                 </li>
               {% elif user.is_investor %}
+                <li class="nav-item">
+                  <a class="nav-link" href="{% url 'accounts:my_investor_profile' %}">{% translate "My profile" %}</a>
+                </li>
                 <li class="nav-item">
                   <a class="nav-link" href="{% url 'accounts:following' %}"{% if request.resolver_match.view_name == 'accounts:following' %} aria-current="page"{% endif %}>{% translate "Following" %}</a>
                 </li>

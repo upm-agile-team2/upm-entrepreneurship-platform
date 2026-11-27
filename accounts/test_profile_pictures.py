@@ -9,7 +9,7 @@ from django.templatetags.static import static
 from django.urls import reverse
 
 from .forms import MAX_AVATAR_SIZE
-from .models import Follow, StudentProfile, User
+from .models import Follow, InvestorProfile, StudentProfile, User
 
 
 def image_upload(name="profile.png", size=(8, 8)):
@@ -60,7 +60,7 @@ class AvatarUploadTests(TemporaryMediaTestCase):
                 if user.is_student:
                     self.assertRedirects(response, reverse("accounts:student_profile"))
                 else:
-                    self.assertRedirects(response, reverse("ideas:home"))
+                    self.assertRedirects(response, reverse("accounts:my_investor_profile"))
                 user.refresh_from_db()
                 self.assertTrue(user.avatar.name.startswith("avatars/"))
                 self.assertTrue(user.avatar.storage.exists(user.avatar.name))
@@ -143,7 +143,7 @@ class AvatarUploadTests(TemporaryMediaTestCase):
             {"avatar": image_upload("attacker.png"), "user_id": target.pk},
         )
 
-        self.assertRedirects(response, reverse("ideas:home"))
+        self.assertRedirects(response, reverse("accounts:my_investor_profile"))
         self.investor.refresh_from_db()
         target.refresh_from_db()
         self.assertTrue(self.investor.avatar.name.startswith("avatars/"))
@@ -166,6 +166,7 @@ class AvatarDisplayTests(TemporaryMediaTestCase):
             role=User.Role.INVESTOR,
         )
         StudentProfile.objects.create(user=self.student)
+        InvestorProfile.objects.create(user=self.investor)
         Follow.objects.create(investor=self.investor, student=self.student)
         self.default_url = static("accounts/default-avatar.svg")
 
@@ -184,6 +185,12 @@ class AvatarDisplayTests(TemporaryMediaTestCase):
         ):
             with self.subTest(url=url):
                 self.assertContains(self.client.get(url), f'src="{self.default_url}"')
+
+        self.client.force_login(self.student)
+        investor_detail = self.client.get(
+            reverse("accounts:investor_profile_detail", args=[self.investor.pk])
+        )
+        self.assertContains(investor_detail, f'src="{self.default_url}"')
 
     def test_saved_avatar_is_displayed_on_student_profile_and_cards(self):
         self.student.avatar.save("display.png", image_upload(), save=True)
@@ -204,10 +211,29 @@ class AvatarDisplayTests(TemporaryMediaTestCase):
             with self.subTest(url=url):
                 self.assertContains(self.client.get(url), f'src="{avatar_url}"')
 
+    def test_uploaded_investor_avatar_is_displayed_on_investor_profile_detail(self):
+        self.investor.avatar.save("investor-display.png", image_upload(), save=True)
+        self.client.force_login(self.student)
+
+        response = self.client.get(
+            reverse("accounts:investor_profile_detail", args=[self.investor.pk])
+        )
+
+        self.assertContains(response, f'src="{self.investor.avatar.url}"')
+
     def test_student_editor_embeds_the_multipart_uploader(self):
         self.client.force_login(self.student)
 
         response = self.client.get(reverse("accounts:student_profile"))
+
+        self.assertContains(response, 'action="/accounts/profile/avatar/"')
+        self.assertContains(response, 'enctype="multipart/form-data"')
+        self.assertContains(response, "Upload a new picture")
+
+    def test_investor_editor_embeds_the_multipart_uploader(self):
+        self.client.force_login(self.investor)
+
+        response = self.client.get(reverse("accounts:edit_investor_profile"))
 
         self.assertContains(response, 'action="/accounts/profile/avatar/"')
         self.assertContains(response, 'enctype="multipart/form-data"')

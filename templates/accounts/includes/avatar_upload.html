@@ -1,0 +1,23 @@
+{% load i18n %}
+<form
+  class="avatar-upload-panel"
+  method="post"
+  action="{% url 'accounts:upload_avatar' %}"
+  enctype="multipart/form-data"
+>
+  {% csrf_token %}
+  {% include "accounts/includes/avatar.html" with avatar_user=avatar_user avatar_class="profile-avatar profile-avatar--large" avatar_size=112 only %}
+  <h2 class="h5">{% translate "Upload a new picture" %}</h2>
+  <div class="mb-3">
+    <label class="form-label" for="id_avatar">{% translate "Profile picture" %}</label>
+    <input
+      class="form-control"
+      id="id_avatar"
+      name="avatar"
+      type="file"
+      accept="image/*"
+      required
+    >
+  </div>
+  <button type="submit" class="btn btn-outline-primary">{% translate "Upload picture" %}</button>
+</form>

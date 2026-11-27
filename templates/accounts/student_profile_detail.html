@@ -23,6 +23,41 @@
       {% endif %}
     </div>
 
+    {% if collaborator_request_form %}
+      {% with request_form=collaborator_request_form %}
+        <section class="card mb-4" aria-labelledby="collaborator-request-title">
+          <div class="card-body">
+            <h2 id="collaborator-request-title" class="h4">{% translate "Request Collaborator" %}</h2>
+            <p>{% blocktranslate with name=student.name %}Invite {{ name }} to help develop one of your published projects.{% endblocktranslate %}</p>
+            {% if request_form.non_field_errors %}
+              <div class="form-errors mb-3" role="alert">{{ request_form.non_field_errors }}</div>
+            {% endif %}
+            {% if has_owned_ideas %}
+              <form id="collaborator-request-form" method="post" action="{% url 'ideas:send_collaborator_request' student.pk %}" aria-labelledby="collaborator-request-title" novalidate>
+                {% csrf_token %}
+                <div class="mb-3">
+                  <label class="form-label" for="{{ request_form.idea.id_for_label }}">{{ request_form.idea.label }}</label>
+                  {{ request_form.idea }}
+                  <p class="form-text mb-0" id="{{ request_form.idea.auto_id }}_helptext">{{ request_form.idea.help_text }}</p>
+                  {% if request_form.idea.errors %}
+                    <div class="invalid-feedback d-block" role="alert">{{ request_form.idea.errors }}</div>
+                  {% endif %}
+                </div>
+                <button type="submit" class="btn btn-primary">{% translate "Request Collaborator" %}</button>
+              </form>
+            {% else %}
+              {% if request_form.idea.errors %}
+                <div class="form-errors mb-3" role="alert">{{ request_form.idea.errors }}</div>
+              {% endif %}
+              <p>{% translate "Publish an idea before sending a collaborator request." %}</p>
+              <a class="btn btn-primary" href="{% url 'ideas:publish' %}">{% translate "Publish an idea" %}</a>
+            {% endif %}
+            <p class="mt-3 mb-0"><a href="{% url 'ideas:collaborator_requests' %}?tab=sent">{% translate "View sent invitations" %}</a></p>
+          </div>
+        </section>
+      {% endwith %}
+    {% endif %}
+
     {% if is_own_profile %}
       <section class="card mb-4" aria-labelledby="profile-visits-title">
         <div class="card-body">

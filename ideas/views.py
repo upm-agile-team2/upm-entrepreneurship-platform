@@ -1,13 +1,23 @@
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.db.models import Q, Prefetch
+from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
+from django.views.decorators.http import require_GET, require_POST
 
-from .forms import FeedbackForm, IdeaForm, ReplyForm
-from .models import Category, Feedback, Idea, Notification, Reply
+from accounts.profile_display import collaborator_profile_context
+
+from .forms import CollaboratorRequestForm, FeedbackForm, IdeaForm, ReplyForm
+from .models import (
+    Category, Collaborator, CollaboratorRequest, Feedback, Idea, Notification, Reply,
+)
+
+User = get_user_model()
 
 
 def home(request):
@@ -35,23 +45,11 @@ def home(request):
 
 def idea_detail(request, idea_id):
     idea = get_object_or_404(
-        Idea.objects.select_related("category", "owner"),
+        Idea.objects.select_related("category", "owner").prefetch_related(
+            Prefetch("collaborators", queryset=User.objects.order_by("name", "pk"))
+        ),
         pk=idea_id,
     )
-    visible_feedback = Feedback.objects.select_related("author").prefetch_related(
-        Prefetch(
-            "replies",
-            queryset=Reply.objects.select_related("author"),
-        )
-    ).filter(idea=idea)
-    if not request.user.is_authenticated:
-        visible_feedback = visible_feedback.filter(is_private=False)
-    elif idea.owner_id == request.user.pk:
-        pass
-    else:
-        visible_feedback = visible_feedback.filter(
-            Q(is_private=False) | Q(is_private=True, author=request.user)
-        )
     can_edit = (
         request.user.is_authenticated
         and request.user.is_student
@@ -67,11 +65,155 @@ def idea_detail(request, idea_id):
             "idea": idea,
             "can_edit": can_edit,
             "can_submit_feedback": can_submit_feedback,
-            "feedback_items": visible_feedback,
+            "feedback_items": _visible_feedback(idea, request.user),
             "feedback_form": FeedbackForm(),
             "reply_form": None,
         },
     )
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+@require_POST
+def send_collaborator_request(request, student_id):
+    if not request.user.is_student:
+        raise PermissionDenied
+
+    receiver = get_object_or_404(
+        User, pk=student_id, role=User.Role.STUDENT, is_active=True
+    )
+    if receiver.pk == request.user.pk:
+        raise PermissionDenied
+
+    form = CollaboratorRequestForm(request.POST, owner=request.user)
+    if form.is_valid():
+        idea = form.cleaned_data["idea"]
+        invitation = CollaboratorRequest(
+            idea=idea,
+            sender=request.user,
+            receiver=receiver,
+            status=CollaboratorRequest.Status.PENDING,
+        )
+        duplicate_message = _(
+            "You have already sent a collaborator request to this student for this project."
+        )
+        try:
+            invitation.full_clean()
+        except ValidationError as error:
+            if CollaboratorRequest.objects.filter(idea=idea, receiver=receiver).exists():
+                form.add_error(None, duplicate_message)
+            else:
+                form.add_error(None, error.messages)
+        else:
+            invitation, created = CollaboratorRequest.objects.get_or_create(
+                idea=idea,
+                receiver=receiver,
+                defaults={
+                    "sender": request.user,
+                    "status": CollaboratorRequest.Status.PENDING,
+                },
+            )
+            if created:
+                messages.success(request, _("Your collaborator request has been sent."))
+                return redirect("accounts:collaborator_profile", student_id=receiver.pk)
+            form.add_error(None, duplicate_message)
+
+    return render(
+        request,
+        "accounts/student_profile_detail.html",
+        collaborator_profile_context(request.user, receiver, form=form),
+    )
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+@require_GET
+def collaborator_requests(request):
+    if not request.user.is_student:
+        raise PermissionDenied
+
+    tab = request.GET.get("tab", "received")
+    if tab not in ("received", "history", "sent"):
+        tab = "received"
+    invitations = CollaboratorRequest.objects.select_related(
+        "idea", "sender", "receiver"
+    ).order_by("-timestamp", "-pk")
+    if tab == "sent":
+        invitations = invitations.filter(sender=request.user)
+    elif tab == "history":
+        invitations = invitations.filter(
+            receiver=request.user,
+            status__in=[
+                CollaboratorRequest.Status.ACCEPTED,
+                CollaboratorRequest.Status.REJECTED,
+            ],
+        )
+    else:
+        invitations = invitations.filter(
+            receiver=request.user, status=CollaboratorRequest.Status.PENDING
+        )
+    return render(
+        request,
+        "ideas/collaborator_requests.html",
+        {"invitations": invitations, "request_tab": tab},
+    )
+
+
+@login_required(login_url=reverse_lazy("accounts:login"))
+@require_POST
+def respond_collaborator_request(request, request_id):
+    if not request.user.is_student:
+        raise PermissionDenied
+
+    invitation = get_object_or_404(
+        CollaboratorRequest.objects.select_related("idea", "sender", "receiver"),
+        pk=request_id,
+        receiver=request.user,
+    )
+    action = request.POST.get("action")
+    statuses = {
+        "accept": CollaboratorRequest.Status.ACCEPTED,
+        "decline": CollaboratorRequest.Status.REJECTED,
+    }
+    if action not in statuses:
+        return HttpResponseBadRequest(_("Choose Accept or Decline."))
+
+    already_handled = _("This collaborator request has already been handled.")
+    if invitation.status != CollaboratorRequest.Status.PENDING:
+        messages.info(request, already_handled)
+        return redirect("ideas:collaborator_requests")
+
+    try:
+        invitation.full_clean()
+    except ValidationError:
+        messages.error(
+            request,
+            _("This collaborator request is no longer valid and cannot be processed."),
+        )
+        return redirect("ideas:collaborator_requests")
+
+    # The conditional write chooses a single outcome even if another response
+    # handled the invitation after we read it. Membership must commit with it.
+    with transaction.atomic():
+        changed = CollaboratorRequest.objects.filter(
+            pk=invitation.pk,
+            receiver=request.user,
+            status=CollaboratorRequest.Status.PENDING,
+        ).update(status=statuses[action])
+        if changed and action == "accept":
+            Collaborator.objects.get_or_create(
+                idea=invitation.idea, collaborator=request.user
+            )
+
+    if not changed:
+        messages.info(request, already_handled)
+    elif action == "accept":
+        messages.success(
+            request,
+            _("You are now a collaborator on \"%(title)s\".")
+            % {"title": invitation.idea.title},
+        )
+    else:
+        messages.success(request, _("The collaborator request has been declined."))
+    return redirect("ideas:collaborator_requests")
 
 
 @login_required(login_url=reverse_lazy("accounts:login"))
@@ -138,7 +280,7 @@ def toggle_feedback_status(request, feedback_id):
 
 
 def _visible_feedback(idea, user):
-    feedback = Feedback.objects.select_related("author").prefetch_related(
+    feedback = Feedback.objects.select_related("author__investor_profile").prefetch_related(
         Prefetch("replies", queryset=Reply.objects.select_related("author"))
     ).filter(idea=idea)
     if not user.is_authenticated:

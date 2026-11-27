@@ -43,6 +43,27 @@ class IdeaForm(forms.ModelForm):
             widget.attrs["class"] = f"{widget.attrs.get('class', '')} is-invalid".strip()
 
 
+class CollaboratorRequestForm(forms.Form):
+    idea = forms.ModelChoiceField(
+        queryset=Idea.objects.none(),
+        label=_("Your project"),
+        empty_label=_("Select a project"),
+        help_text=_("Choose the project you want this student to help develop."),
+        widget=forms.Select(attrs={"class": "form-select"}),
+        error_messages={
+            "required": _("Please select one of your published projects."),
+            "invalid_choice": _("Select one of your own published projects."),
+        },
+    )
+
+    def __init__(self, *args, owner, **kwargs):
+        super().__init__(*args, **kwargs)
+        if owner.is_authenticated and owner.is_student and owner.pk is not None:
+            self.fields["idea"].queryset = Idea.objects.filter(owner=owner).order_by(
+                "title", "pk"
+            )
+
+
 class FeedbackForm(forms.ModelForm):
     class Meta:
         model = Feedback
