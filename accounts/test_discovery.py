@@ -227,7 +227,7 @@ class ProfileDiscoveryPresentationTests(ProfileDiscoveryData, TestCase):
         self.assertContains(response, "All skills")
         self.assertEqual(response.context["profile_count"], 3)
 
-    def test_navigation_shows_discovery_to_students_and_investors(self):
+    def test_navigation_shows_discovery_and_notifications_to_authenticated_users(self):
         for user in (self.investor, self.alex, None):
             with self.subTest(user=user.pk if user else None):
                 self.client.logout()
@@ -240,7 +240,7 @@ class ProfileDiscoveryPresentationTests(ProfileDiscoveryData, TestCase):
                 else:
                     self.assertNotContains(response, link)
                 notifications_link = f'href="{reverse("ideas:notifications")}"'
-                if user == self.alex:
+                if user:
                     self.assertContains(response, notifications_link)
                 else:
                     self.assertNotContains(response, notifications_link)

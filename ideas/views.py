@@ -251,7 +251,19 @@ def submit_reply(request, feedback_id):
         reply.feedback = feedback
         reply.author = request.user
         reply.save()
-        Notification.objects.filter(feedback=feedback).delete()
+        Notification.objects.filter(
+            feedback=feedback,
+            type=Notification.Type.FEEDBACK_RECEIVED,
+        ).delete()
+        if (
+            feedback.author_id
+            and feedback.author.is_investor
+        ):
+            Notification.objects.create(
+                recipient=feedback.author,
+                reply=reply,
+                type=Notification.Type.FEEDBACK_REPLY,
+            )
         messages.success(request, _("Your reply has been submitted."))
         return redirect("ideas:detail", idea_id=feedback.idea_id)
     return _render_idea_detail_with_reply_form(request, feedback.idea, feedback, form)
@@ -326,9 +338,23 @@ def publish_idea(request):
         raise PermissionDenied
     form = IdeaForm(request.POST if request.method == "POST" else None)
     if request.method == "POST" and form.is_valid():
-        idea = form.save(commit=False)
-        idea.owner = request.user
-        idea.save()
+        with transaction.atomic():
+            idea = form.save(commit=False)
+            idea.owner = request.user
+            idea.save()
+            followers = request.user.investor_followers.filter(
+                investor__role="investor"
+            ).exclude(investor_id=idea.owner_id).select_related("investor")
+            Notification.objects.bulk_create(
+                [
+                    Notification(
+                        recipient=follow.investor,
+                        idea=idea,
+                        type=Notification.Type.IDEA_PUBLISHED,
+                    )
+                    for follow in followers
+                ]
+            )
         messages.success(request, _("Your idea has been published."))
         return redirect("ideas:home")
     return render(
@@ -376,10 +402,13 @@ def edit_idea(request, idea_id):
 def notifications(request):
     notification_items = Notification.objects.filter(
         recipient=request.user
-    ).select_related("feedback__idea", "feedback__author")
+    ).select_related(
+        "feedback__idea", "feedback__author", "idea", "reply__feedback__idea"
+    )
     notification_filter = request.GET.get("filter")
     if notification_filter == "unanswered":
         notification_items = notification_items.filter(
+            type=Notification.Type.FEEDBACK_RECEIVED,
             feedback__status=Feedback.Status.NORMAL,
             feedback__replies__isnull=True,
         )
@@ -420,14 +449,22 @@ def mark_notifications_read(request):
 @login_required(login_url=reverse_lazy("accounts:login"))
 def open_notification(request, notification_id):
     notification = get_object_or_404(
-        Notification.objects.select_related("feedback__idea"),
+        Notification.objects.select_related(
+            "feedback__idea", "idea", "reply__feedback__idea"
+        ),
         pk=notification_id,
         recipient=request.user,
     )
     if not notification.is_read:
         notification.is_read = True
         notification.save(update_fields=["is_read"])
-    return redirect(
-        f"{reverse('ideas:detail', args=[notification.feedback.idea_id])}"
-        f"#feedback-{notification.feedback_id}"
-    )
+    if notification.type == Notification.Type.IDEA_PUBLISHED:
+        return redirect("ideas:detail", idea_id=notification.idea_id)
+    if notification.type == Notification.Type.FEEDBACK_REPLY:
+        return redirect(
+            f"{reverse('ideas:detail', args=[notification.reply.feedback.idea_id])}"
+            f"#reply-{notification.reply_id}"
+        )
+    else:
+        feedback = notification.feedback
+    return redirect(f"{reverse('ideas:detail', args=[feedback.idea_id])}#feedback-{feedback.pk}")

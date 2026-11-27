@@ -12,6 +12,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from accounts.models import Follow
 from .forms import CollaboratorRequestForm, IdeaForm
 from .management.commands.seed_demo_ideas import (
     DEMO_AUTHOR_KEY_PREFIX,
@@ -1569,6 +1570,68 @@ class SubmitIdeaTests(TestCase):
         )
         self.assertEqual(Idea.objects.get().owner, self.student)
 
+    def test_publication_notifies_following_investors_only(self):
+        follower = User.objects.create_user(
+            email="follower@example.com",
+            password="A-valid-password-123!",
+            name="Following Investor",
+            role=User.Role.INVESTOR,
+        )
+        non_follower = User.objects.create_user(
+            email="non-follower@example.com",
+            password="A-valid-password-123!",
+            name="Other Investor",
+            role=User.Role.INVESTOR,
+        )
+        Follow.objects.create(investor=follower, student=self.student)
+
+        self.client.post(
+            self.url, {"title": "Campus bikes", "description": "Share bikes."}
+        )
+
+        notification = Notification.objects.get()
+        idea = Idea.objects.get()
+        self.assertEqual(notification.type, Notification.Type.IDEA_PUBLISHED)
+        self.assertEqual(notification.idea, idea)
+        self.assertEqual(notification.recipient, follower)
+        self.assertFalse(Notification.objects.filter(recipient=self.student).exists())
+        self.assertFalse(Notification.objects.filter(recipient=non_follower).exists())
+
+    def test_invalid_publication_does_not_notify_followers(self):
+        follower = User.objects.create_user(
+            email="invalid-follower@example.com",
+            password="A-valid-password-123!",
+            name="Following Investor",
+            role=User.Role.INVESTOR,
+        )
+        Follow.objects.create(investor=follower, student=self.student)
+
+        response = self.client.post(self.url, {"title": "", "description": ""})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Idea.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_editing_an_idea_does_not_create_publication_notifications(self):
+        follower = User.objects.create_user(
+            email="edit-follower@example.com",
+            password="A-valid-password-123!",
+            name="Following Investor",
+            role=User.Role.INVESTOR,
+        )
+        Follow.objects.create(investor=follower, student=self.student)
+        idea = Idea.objects.create(
+            title="Original", description="Original description", owner=self.student
+        )
+
+        response = self.client.post(
+            reverse("ideas:edit", args=[idea.pk]),
+            {"title": "Updated", "description": "Updated description"},
+        )
+
+        self.assertRedirects(response, reverse("ideas:home"))
+        self.assertFalse(Notification.objects.exists())
+
 
 class EditIdeaTests(TestCase):
     def setUp(self):
@@ -2467,6 +2530,17 @@ class FeedbackFeatureTests(TestCase):
         )
         self.detail_url = reverse("ideas:detail", args=[self.idea.pk])
 
+    def test_unanswered_feedback_filter_is_shown_only_to_students(self):
+        url = reverse("ideas:notifications")
+
+        self.client.force_login(self.owner)
+        student_response = self.client.get(url)
+        self.assertContains(student_response, "No answered feedback")
+
+        self.client.force_login(self.investor)
+        investor_response = self.client.get(url)
+        self.assertNotContains(investor_response, "No answered feedback")
+
     def test_investor_can_submit_feedback_and_author_is_displayed(self):
         self.client.force_login(self.investor)
         response = self.client.post(
@@ -2551,6 +2625,76 @@ class FeedbackFeatureTests(TestCase):
         notification.refresh_from_db()
         self.assertTrue(notification.is_read)
 
+    def test_investor_can_open_publication_notification_to_idea(self):
+        notification = Notification.objects.create(
+            recipient=self.investor,
+            idea=self.idea,
+            type=Notification.Type.IDEA_PUBLISHED,
+        )
+        self.client.force_login(self.investor)
+
+        response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+
+        self.assertRedirects(response, self.detail_url)
+        notification.refresh_from_db()
+        self.assertTrue(notification.is_read)
+
+        self.client.force_login(self.other_investor)
+        forbidden_response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+        self.assertEqual(forbidden_response.status_code, 404)
+
+    def test_notification_center_displays_all_notification_types(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=self.investor, text="A suggestion."
+        )
+        reply = Reply.objects.create(
+            feedback=feedback, author=self.owner, text="We will consider it."
+        )
+        Notification.objects.create(
+            recipient=self.investor,
+            type=Notification.Type.FEEDBACK_REPLY,
+            reply=reply,
+        )
+        Notification.objects.create(
+            recipient=self.investor,
+            idea=self.idea,
+            type=Notification.Type.IDEA_PUBLISHED,
+        )
+        Notification.objects.create(recipient=self.investor, feedback=feedback)
+        self.client.force_login(self.investor)
+
+        response = self.client.get(reverse("ideas:notifications"))
+
+        self.assertContains(response, 'New idea published: "Feedback idea"')
+        self.assertContains(response, 'A student replied to your feedback on "Feedback idea"')
+        self.assertContains(response, 'New feedback on "Feedback idea"')
+
+    def test_unanswered_filter_excludes_non_feedback_notifications(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=self.investor, text="A suggestion."
+        )
+        publication = Notification.objects.create(
+            recipient=self.owner,
+            idea=self.idea,
+            type=Notification.Type.IDEA_PUBLISHED,
+        )
+        Notification.objects.create(recipient=self.owner, feedback=feedback)
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("ideas:notifications"), {"filter": "unanswered"}
+        )
+
+        self.assertEqual(
+            list(response.context["notification_items"]),
+            [Notification.objects.get(feedback=feedback)],
+        )
+        self.assertNotIn(publication, response.context["notification_items"])
+
     def test_owner_can_remove_notification_without_opening_feedback(self):
         feedback = Feedback.objects.create(
             idea=self.idea,
@@ -2627,7 +2771,23 @@ class FeedbackFeatureTests(TestCase):
                 Notification(recipient=other_owner, feedback=other_feedback),
             ]
         )
+        reply = Reply.objects.create(
+            feedback=feedbacks[0], author=self.owner, text="A student reply."
+        )
+        Notification.objects.create(
+            recipient=self.owner,
+            idea=self.idea,
+            type=Notification.Type.IDEA_PUBLISHED,
+        )
+        Notification.objects.create(
+            recipient=self.owner,
+            reply=reply,
+            type=Notification.Type.FEEDBACK_REPLY,
+        )
         self.client.force_login(self.owner)
+
+        center_response = self.client.get(reverse("ideas:notifications"))
+        self.assertEqual(center_response.context["unread_notification_count"], 4)
 
         response = self.client.post(reverse("ideas:mark-notifications-read"))
 
@@ -2828,6 +2988,11 @@ class FeedbackFeatureTests(TestCase):
         self.assertEqual(reply.author, self.owner)
         self.assertContains(self.client.get(self.detail_url), reply.text)
         self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
+        reply_notification = Notification.objects.get(
+            type=Notification.Type.FEEDBACK_REPLY
+        )
+        self.assertEqual(reply_notification.recipient, self.investor)
+        self.assertEqual(reply_notification.reply, reply)
 
         notification = Notification.objects.create(
             recipient=self.owner,
@@ -2866,6 +3031,72 @@ class FeedbackFeatureTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Please enter a reply.")
         self.assertFalse(Reply.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_each_reply_creates_a_distinct_notification_and_cleanup_preserves_them(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=self.investor, text="Please consider this."
+        )
+        old_notification = Notification.objects.create(
+            recipient=self.owner, feedback=feedback
+        )
+        self.client.force_login(self.owner)
+
+        for reply_text in ("First reply.", "Second reply."):
+            response = self.client.post(
+                reverse("ideas:reply", args=[feedback.pk]), {"text": reply_text}
+            )
+            self.assertRedirects(response, self.detail_url)
+
+        reply_notifications = Notification.objects.filter(
+            recipient=self.investor, type=Notification.Type.FEEDBACK_REPLY
+        )
+        self.assertEqual(reply_notifications.count(), 2)
+        self.assertEqual(
+            set(reply_notifications.values_list("reply__text", flat=True)),
+            {"First reply.", "Second reply."},
+        )
+        self.assertFalse(Notification.objects.filter(pk=old_notification.pk).exists())
+
+    def test_reply_does_not_notify_null_or_non_investor_feedback_author(self):
+        non_investor_author = create_student("student-feedback-author@example.com")
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=non_investor_author, text="Student-authored feedback."
+        )
+        feedback_with_deleted_author = Feedback.objects.create(
+            idea=self.idea, author=self.other_investor, text="Former investor feedback."
+        )
+        self.other_investor.delete()
+        feedback_with_deleted_author.refresh_from_db()
+        self.assertIsNone(feedback_with_deleted_author.author)
+        self.client.force_login(self.owner)
+
+        for item in (feedback, feedback_with_deleted_author):
+            self.client.post(
+                reverse("ideas:reply", args=[item.pk]), {"text": "A reply."}
+            )
+
+        self.assertFalse(Notification.objects.filter(type=Notification.Type.FEEDBACK_REPLY).exists())
+
+    def test_reply_notification_opens_feedback_discussion(self):
+        feedback = Feedback.objects.create(
+            idea=self.idea, author=self.investor, text="A suggestion."
+        )
+        reply = Reply.objects.create(
+            feedback=feedback, author=self.owner, text="A reply."
+        )
+        notification = Notification.objects.create(
+            recipient=self.investor,
+            reply=reply,
+            type=Notification.Type.FEEDBACK_REPLY,
+        )
+        self.client.force_login(self.investor)
+
+        response = self.client.get(
+            reverse("ideas:open-notification", args=[notification.pk])
+        )
+
+        self.assertRedirects(response, f"{self.detail_url}#reply-{reply.pk}")
 
     def test_non_owner_cannot_reply_or_change_status(self):
         feedback = Feedback.objects.create(
@@ -2884,3 +3115,106 @@ class FeedbackFeatureTests(TestCase):
             reverse("ideas:feedback-status", args=[feedback.pk])
         )
         self.assertEqual(status_response.status_code, 403)
+
+
+class NotificationTargetConstraintTests(TestCase):
+    def setUp(self):
+        self.owner = create_student("notification-constraint-owner@example.com")
+        self.investor = User.objects.create_user(
+            email="notification-constraint-investor@example.com",
+            password="A-valid-password-123!",
+            name="Constraint Investor",
+            role=User.Role.INVESTOR,
+        )
+        self.idea = Idea.objects.create(
+            title="Constraint idea",
+            description="An idea for notification constraint tests.",
+            owner=self.owner,
+        )
+        self.feedback = Feedback.objects.create(
+            idea=self.idea,
+            author=self.investor,
+            text="A feedback item.",
+        )
+        self.reply = Reply.objects.create(
+            feedback=self.feedback,
+            author=self.owner,
+            text="A reply.",
+        )
+
+    def test_each_notification_type_accepts_its_matching_target(self):
+        notifications = [
+            Notification.objects.create(
+                recipient=self.owner,
+                type=Notification.Type.FEEDBACK_RECEIVED,
+                feedback=self.feedback,
+            ),
+            Notification.objects.create(
+                recipient=self.investor,
+                type=Notification.Type.IDEA_PUBLISHED,
+                idea=self.idea,
+            ),
+            Notification.objects.create(
+                recipient=self.investor,
+                type=Notification.Type.FEEDBACK_REPLY,
+                reply=self.reply,
+            ),
+        ]
+
+        self.assertEqual(Notification.objects.count(), 3)
+        self.assertEqual(
+            [notification.type for notification in notifications],
+            [
+                Notification.Type.FEEDBACK_RECEIVED,
+                Notification.Type.IDEA_PUBLISHED,
+                Notification.Type.FEEDBACK_REPLY,
+            ],
+        )
+
+    def test_database_rejects_missing_or_mismatched_targets(self):
+        invalid_notifications = [
+            Notification(recipient=self.owner, type=Notification.Type.FEEDBACK_RECEIVED),
+            Notification(
+                recipient=self.owner,
+                type=Notification.Type.FEEDBACK_RECEIVED,
+                feedback=self.feedback,
+                idea=self.idea,
+            ),
+            Notification(recipient=self.investor, type=Notification.Type.IDEA_PUBLISHED),
+            Notification(
+                recipient=self.investor,
+                type=Notification.Type.IDEA_PUBLISHED,
+                idea=self.idea,
+                feedback=self.feedback,
+            ),
+            Notification(recipient=self.investor, type=Notification.Type.FEEDBACK_REPLY),
+            Notification(
+                recipient=self.investor,
+                type=Notification.Type.FEEDBACK_REPLY,
+                reply=self.reply,
+                feedback=self.feedback,
+            ),
+            Notification(
+                recipient=self.investor,
+                type=Notification.Type.FEEDBACK_REPLY,
+                reply=self.reply,
+                idea=self.idea,
+            ),
+        ]
+
+        for notification in invalid_notifications:
+            with self.subTest(type=notification.type):
+                with self.assertRaises(IntegrityError):
+                    with transaction.atomic():
+                        notification.save()
+
+    def test_existing_feedback_notification_shape_remains_valid(self):
+        notification = Notification.objects.create(
+            recipient=self.owner,
+            feedback=self.feedback,
+        )
+
+        self.assertEqual(notification.type, Notification.Type.FEEDBACK_RECEIVED)
+        self.assertEqual(notification.feedback, self.feedback)
+        self.assertIsNone(notification.idea)
+        self.assertIsNone(notification.reply)

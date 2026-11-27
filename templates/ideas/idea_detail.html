@@ -139,7 +139,7 @@
         {% endif %}
 
         {% for reply in feedback.replies.all %}
-          <div class="feedback-reply">
+          <div id="reply-{{ reply.pk }}" class="feedback-reply">
             <div class="feedback-meta">
               <strong>{% if reply.author %}{{ reply.author.name }}{% else %}{% translate "Former user" %}{% endif %}</strong>
               <time datetime="{{ reply.timestamp|date:'c' }}">{{ reply.timestamp|date:"M j, Y" }}</time>
