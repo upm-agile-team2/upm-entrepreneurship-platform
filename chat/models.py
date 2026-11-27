@@ -34,6 +34,7 @@ class Message(models.Model):
     )
     text = models.TextField(_("text"), blank=False)
     timestamp = models.DateTimeField(_("timestamp"), auto_now_add=True)
+    is_read = models.BooleanField(_("is read"), default=False)
 
     class Meta:
         ordering = ["timestamp", "id"]

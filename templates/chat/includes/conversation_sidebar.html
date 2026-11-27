@@ -1,0 +1,55 @@
+{% load i18n %}
+<aside class="chat-sidebar" aria-label="{% translate 'Chats and new conversations' %}">
+  <header class="chat-sidebar-header">
+    <div>
+      <p class="eyebrow mb-1">UPM ideaHub</p>
+      <h1 class="h3 mb-0">{% translate "Chats" %}</h1>
+    </div>
+    <details class="chat-new-conversation"{% if start_form.errors %} open{% endif %}>
+      <summary class="btn btn-primary btn-sm">{% translate "New chat" %}</summary>
+      <form method="post" action="{% url 'chat:start' %}" class="chat-new-conversation-form" novalidate>
+        {% csrf_token %}
+        <label class="form-label" for="{{ start_form.recipient.id_for_label }}">{{ start_form.recipient.label }}</label>
+        {{ start_form.recipient }}
+        {% if start_form.recipient.errors %}
+          <div class="invalid-feedback d-block" role="alert">{{ start_form.recipient.errors }}</div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary w-100 mt-3">{% translate "Start chat" %}</button>
+      </form>
+    </details>
+  </header>
+
+  <nav class="chat-conversation-list" aria-label="{% translate 'Your conversations' %}">
+    {% for conversation in conversations %}
+      <a class="chat-conversation-link{% if selected_conversation.pk == conversation.pk %} is-active{% endif %}"
+         href="{% url 'chat:detail' conversation.pk %}"{% if selected_conversation.pk == conversation.pk %} aria-current="page"{% endif %}>
+        <span class="chat-avatar" aria-hidden="true">
+          {% for participant in conversation.participants.all %}{% if participant.pk != user.pk %}{{ participant.name|first|upper }}{% endif %}{% endfor %}
+        </span>
+        <span class="chat-conversation-copy">
+          <strong class="chat-conversation-name">
+            {% for participant in conversation.participants.all %}
+              {% if participant.pk != user.pk %}{{ participant.name }}{% endif %}
+            {% endfor %}
+          </strong>
+          {% with latest=conversation.latest_messages.0 %}
+            {% if latest %}
+              <span class="chat-conversation-preview">{% if latest.sender_id == user.pk %}{% translate "You:" %} {% endif %}{{ latest.text|truncatechars:56 }}</span>
+              <time class="chat-conversation-time" datetime="{{ latest.timestamp|date:'c' }}">{{ latest.timestamp|date:"M j" }}</time>
+            {% else %}
+              <span class="chat-conversation-preview">{% translate "No messages yet" %}</span>
+            {% endif %}
+          {% endwith %}
+          {% if conversation.unread_count %}
+            <span class="badge text-bg-primary chat-unread-badge" aria-label="{% blocktranslate with count=conversation.unread_count %}{{ count }} unread messages{% endblocktranslate %}">{{ conversation.unread_count }}</span>
+          {% endif %}
+        </span>
+      </a>
+    {% empty %}
+      <div class="chat-list-empty">
+        <p class="mb-1">{% translate "No chats yet" %}</p>
+        <span>{% translate "Start a new chat to connect with someone." %}</span>
+      </div>
+    {% endfor %}
+  </nav>
+</aside>

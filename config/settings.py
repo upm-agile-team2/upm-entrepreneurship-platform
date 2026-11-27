@@ -51,6 +51,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "ideas.context_processors.notification_count",
+                "chat.context_processors.unread_message_count",
             ],
         },
     },

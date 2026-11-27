@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Chats" %} | UPM ideaHub{% endblock %}
+
+{% block content %}
+  <section class="chat-workspace chat-workspace--thread" aria-label="{% translate 'Chats' %}">
+    {% include "chat/includes/conversation_sidebar.html" %}
+    <section class="chat-main" aria-labelledby="conversation-heading">
+      <header class="chat-thread-header">
+        <a class="chat-back-link" href="{% url 'chat:list' %}">{% translate "All chats" %}</a>
+        <span class="chat-avatar chat-thread-avatar" aria-hidden="true">
+          {% for participant in other_participants %}{{ participant.name|first|upper }}{% endfor %}
+        </span>
+        <div class="chat-thread-heading">
+          <h2 id="conversation-heading" class="h5 mb-0">
+            {% for participant in other_participants %}{{ participant.name }}{% if not forloop.last %}, {% endif %}{% empty %}{% translate "Conversation" %}{% endfor %}
+          </h2>
+          <span class="small text-body-secondary">{% translate "Conversation" %}</span>
+        </div>
+      </header>
+
+      <section class="chat-message-list" aria-label="{% translate 'Messages' %}">
+        {% for message in chat_messages %}
+          <article class="chat-message{% if message.sender_id == user.pk %} chat-message--own{% endif %}"
+                   aria-label="{% if message.sender %}{% blocktranslate with sender=message.sender.name %}Message from {{ sender }}{% endblocktranslate %}{% else %}{% translate 'Message from former user' %}{% endif %}">
+            <div class="chat-message-bubble">
+              {% if message.sender_id != user.pk %}
+                <strong class="chat-message-sender">{% if message.sender %}{{ message.sender.name }}{% else %}{% translate "Former user" %}{% endif %}</strong>
+              {% endif %}
+              <p class="mb-1 text-break">{{ message.text|linebreaksbr }}</p>
+              <time class="chat-message-time" datetime="{{ message.timestamp|date:'c' }}">{{ message.timestamp|date:"M j, P" }}</time>
+            </div>
+          </article>
+        {% empty %}
+          <div class="chat-thread-empty">
+            <p>{% translate "No messages yet. Send the first message below." %}</p>
+          </div>
+        {% endfor %}
+      </section>
+
+      <form method="post" class="chat-compose-form" novalidate>
+        {% csrf_token %}
+        <div class="chat-compose-field">
+          <label class="visually-hidden" for="{{ form.text.id_for_label }}">{{ form.text.label }}</label>
+          {{ form.text }}
+          {% if form.text.errors %}
+            <div class="invalid-feedback d-block" role="alert">{{ form.text.errors }}</div>
+          {% endif %}
+        </div>
+        <button type="submit" class="btn btn-primary">{% translate "Send" %}</button>
+      </form>
+    </section>
+  </section>
+{% endblock %}
